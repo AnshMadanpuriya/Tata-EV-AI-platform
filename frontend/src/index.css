@@ -1,0 +1,87 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background-color: #080C14;
+    color: #E8EDF5;
+    font-family: 'DM Sans', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: #080C14; }
+  ::-webkit-scrollbar-thumb { background: #1A2540; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #0066FF; }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-ev-blue hover:bg-blue-500 text-white font-semibold px-6 py-3 rounded-lg transition-all duration-200 cursor-pointer;
+  }
+  .btn-secondary {
+    @apply border border-ev-border hover:border-ev-blue text-ev-cyan font-semibold px-6 py-3 rounded-lg transition-all duration-200 bg-transparent cursor-pointer;
+  }
+  .card {
+    @apply bg-ev-card border border-ev-border rounded-xl;
+  }
+  .input-field {
+    @apply bg-ev-card border border-ev-border rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-ev-blue transition-colors w-full;
+  }
+  .gradient-text {
+    @apply bg-gradient-to-r from-ev-blue via-ev-cyan to-ev-green bg-clip-text text-transparent;
+  }
+  .section-label {
+    @apply text-xs font-mono font-semibold tracking-widest text-ev-cyan uppercase;
+  }
+}
+
+/* Animations */
+@keyframes spin        { to { transform: rotate(360deg); } }
+@keyframes pulse-dot   { 0%,100%{opacity:1} 50%{opacity:0.3} }
+@keyframes float       { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)} }
+@keyframes slideUp     { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+@keyframes fadeIn      { from{opacity:0} to{opacity:1} }
+@keyframes barwave     { 0%,100%{transform:scaleY(0.3)} 50%{transform:scaleY(1)} }
+@keyframes el-ping     { 0%{transform:scale(1);opacity:0.6} 100%{transform:scale(1.9);opacity:0} }
+
+/* Typing dots */
+@keyframes dotPulse {
+  0%,60%,100% { opacity:0; transform:scale(0.7); }
+  30% { opacity:1; transform:scale(1); }
+}
+.typing-dot:nth-child(1) { animation: dotPulse 1.4s infinite 0s; }
+.typing-dot:nth-child(2) { animation: dotPulse 1.4s infinite 0.2s; }
+.typing-dot:nth-child(3) { animation: dotPulse 1.4s infinite 0.4s; }
+
+.animate-slide-up { animation: slideUp 0.4s ease-out; }
+.animate-fade-in  { animation: fadeIn  0.4s ease-out; }
+
+/* Remove number input arrows */
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[type=number] { -moz-appearance: textfield; }
+
+/* Grid background pattern */
+.bg-grid-pattern {
+  background-image:
+    linear-gradient(rgba(0,102,255,0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,102,255,0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* ============================================================
+   ELEVENLABS WIDGET — BOTTOM-LEFT POSITION
+   Replaces the removed orange mic button's spot.
+   Pink chat button stays untouched at bottom-right.
+   ============================================================ */
+
+/* elevenlabs-convai {
+  position: fixed !important;
+  bottom: 20px !important;
+  left: 20px !important;
+  right: auto !important;
+  z-index: 9998 !important;
+} */

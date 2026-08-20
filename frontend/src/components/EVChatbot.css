@@ -134,6 +134,25 @@
   box-shadow: 0 0 8px rgba(52, 232, 139, 0.8);
 }
 
+.ev-chat-status.checking .ev-status-dot {
+  background: #fbbf24;
+  box-shadow: 0 0 8px rgba(251, 191, 36, 0.75);
+  animation: evStatusPulse 1s ease-in-out infinite;
+}
+
+.ev-chat-status.offline {
+  color: #ffb9c3;
+}
+
+.ev-chat-status.offline .ev-status-dot {
+  background: #fb7185;
+  box-shadow: 0 0 8px rgba(251, 113, 133, 0.75);
+}
+
+@keyframes evStatusPulse {
+  50% { opacity: 0.35; transform: scale(0.8); }
+}
+
 .ev-chat-actions {
   display: flex;
   align-items: center;

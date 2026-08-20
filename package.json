@@ -5,8 +5,13 @@
   "main": "index.js",
   "scripts": {
     "frontend": "cd frontend && npm start",
-    "backend": "cd backend && npm start",
-    "dev": "concurrently \"cd backend && npm start\" \"cd frontend && npm start\""
+    "backend": "npm --prefix backend run dev",
+    "rag:start": "python -m uvicorn app:app --app-dir rag-service --reload --port 8000",
+    "rag:ingest": "python rag-service/ingest.py",
+    "setup:node": "npm install && npm --prefix backend install && npm --prefix frontend install",
+    "setup:rag": "python -m pip install -r rag-service/requirements.txt",
+    "dev": "concurrently -n BACKEND,FRONTEND \"npm --prefix backend run dev\" \"npm --prefix frontend start\"",
+    "dev:all": "concurrently -n BACKEND,FRONTEND,RAG \"npm --prefix backend run dev\" \"npm --prefix frontend start\" \"npm run rag:start\""
   },
   "keywords": [],
   "author": "",

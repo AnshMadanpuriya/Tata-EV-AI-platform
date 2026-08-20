@@ -1,8 +1,10 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import "./EVChatbot.css";
 
-const API_URL =
+const RAG_API_URL =
   process.env.REACT_APP_RAG_API_URL || "http://127.0.0.1:8000";
+const NODE_API_URL =
+  process.env.REACT_APP_API_URL || "http://127.0.0.1:5000/api";
 
 const firstMessage = {
   id: 1,
@@ -65,6 +67,7 @@ export default function EVChatbot() {
   const [messages, setMessages] = useState([firstMessage]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [service, setService] = useState("checking");
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -78,6 +81,44 @@ export default function EVChatbot() {
       setTimeout(() => inputRef.current?.focus(), 200);
     }
   }, [isOpen]);
+
+  const checkServices = useCallback(async () => {
+    setService("checking");
+
+    const isHealthy = async (url) => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 2500);
+
+      try {
+        const response = await fetch(url, { signal: controller.signal });
+        return response.ok;
+      } catch {
+        return false;
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
+
+    if (await isHealthy(`${RAG_API_URL}/health`)) {
+      setService("rag");
+      return;
+    }
+
+    if (await isHealthy(`${NODE_API_URL}/health`)) {
+      setService("fallback");
+      return;
+    }
+
+    setService("offline");
+  }, []);
+
+  useEffect(() => {
+    checkServices();
+  }, [checkServices]);
+
+  useEffect(() => {
+    if (isOpen) checkServices();
+  }, [checkServices, isOpen]);
 
   const clearChat = () => {
     setMessages([firstMessage]);
@@ -100,28 +141,39 @@ export default function EVChatbot() {
     setLoading(true);
 
     try {
-      const response = await fetch(`${API_URL}/chat`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message: question,
-        }),
-      });
+      const services = [
+        { url: `${RAG_API_URL}/chat`, answerKey: "answer", status: "rag" },
+        { url: `${NODE_API_URL}/chat`, answerKey: "response", status: "fallback" },
+      ];
+      let answer = "";
 
-      const data = await response.json();
+      for (const current of services) {
+        try {
+          const response = await fetch(current.url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: question }),
+          });
+          const data = await response.json();
 
-      if (!response.ok) {
-        throw new Error(data.detail || "Chatbot response nahi de paaya.");
+          if (response.ok && data[current.answerKey]) {
+            answer = data[current.answerKey];
+            setService(current.status);
+            break;
+          }
+        } catch {
+          // Try the next available service.
+        }
       }
+
+      if (!answer) throw new Error("No EV assistant service is available.");
 
       setMessages((previous) => [
         ...previous,
         {
           id: Date.now() + 1,
           role: "assistant",
-          text: data.answer,
+          text: answer,
         },
       ]);
     } catch (error) {
@@ -131,9 +183,10 @@ export default function EVChatbot() {
           id: Date.now() + 1,
           role: "assistant",
           error: true,
-          text: "Chatbot server se connection nahi ho paaya. RAG server port 8000 par start hona chahiye.",
+          text: "AI service abhi offline hai. Backend ya RAG service start karke **Retry connection** dabaiye.",
         },
       ]);
+      setService("offline");
     } finally {
       setLoading(false);
     }
@@ -161,9 +214,12 @@ export default function EVChatbot() {
               <div>
                 <div className="ev-chat-title">TataEV AI Assistant</div>
 
-                <div className="ev-chat-status">
+                <div className={`ev-chat-status ${service}`}>
                   <span className="ev-status-dot" />
-                  RAG Assistant Online
+                  {service === "rag" && "RAG Assistant Online"}
+                  {service === "fallback" && "Smart Assistant Online"}
+                  {service === "checking" && "Checking AI service..."}
+                  {service === "offline" && "AI service offline"}
                 </div>
               </div>
             </div>
@@ -243,6 +299,10 @@ export default function EVChatbot() {
               onClick={() => setInput("Fast charging ke baare mein batao")}
             >
               Charging
+            </button>
+
+            <button type="button" onClick={checkServices}>
+              Retry connection
             </button>
           </div>
 

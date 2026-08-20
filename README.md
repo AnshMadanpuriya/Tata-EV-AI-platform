@@ -56,15 +56,12 @@ tata-motors-ev/
 ### 1. Clone & Install
 
 ```bash
-git clone <repo-url>
-cd tata-motors-ev
-
-# Install backend dependencies
-cd backend && npm install
-
-# Install frontend dependencies
-cd ../frontend && npm install
+git clone https://github.com/AnshMadanpuriya/Tata-EV-AI-platform.git
+cd Tata-EV-AI-platform
+npm run setup:node
 ```
+
+`npm run setup:node` installs the root, backend, and frontend packages. Run it once after cloning; otherwise Node may report `Cannot find module 'express'`.
 
 ---
 
@@ -91,6 +88,12 @@ npm run dev    # Development (with nodemon)
 npm start      # Production
 ```
 
+From the repository root, start frontend and backend together with:
+
+```bash
+npm run dev
+```
+
 ---
 
 ### 3. Frontend Setup
@@ -113,7 +116,20 @@ The app will open at **http://localhost:3000**
 
 ---
 
-### 4. n8n Setup (AI Workflows)
+### 4. Optional RAG Assistant Setup
+
+```bash
+copy rag-service\.env.example rag-service\.env
+npm run setup:rag
+npm run rag:ingest
+npm run rag:start
+```
+
+Add your Mistral API key to `rag-service/.env` before ingestion. The RAG API runs at **http://localhost:8000**. If it is unavailable, the website chatbot automatically uses the Node assistant on port 5000.
+
+---
+
+### 5. n8n Setup (AI Workflows)
 
 ```bash
 # Install n8n globally

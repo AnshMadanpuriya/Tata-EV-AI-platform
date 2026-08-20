@@ -47,6 +47,21 @@ const staggerItem = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] } },
 };
 
+const featureCardVariants = {
+  hidden: { opacity: 0, y: 56, scale: 0.94, rotateX: 8 },
+  visible: (index) => ({
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    rotateX: 0,
+    transition: {
+      delay: index * 0.075,
+      duration: 0.65,
+      ease: [0.22, 1, 0.36, 1],
+    },
+  }),
+};
+
 // ============================================================
 // REUSABLE ANIMATED SECTION WRAPPER
 // ============================================================
@@ -190,6 +205,7 @@ function Hero() {
   const slides = [
     {
       image: '/images/ev-city-drive.webp',
+      navLabel: 'Intelligence',
       eyebrow: 'Built for the EV revolution',
       title: 'Intelligence that moves with you.',
       description: 'Compare electric vehicles, understand real-world range and turn every customer question into a confident next step.',
@@ -197,6 +213,7 @@ function Hero() {
     },
     {
       image: '/images/ev-mountain-drive.webp',
+      navLabel: 'Freedom',
       eyebrow: 'Range without the guesswork',
       title: 'Go farther. Choose smarter.',
       description: 'Personalised range, charging and ownership insights help every driver find an EV that fits their life.',
@@ -204,9 +221,10 @@ function Hero() {
     },
     {
       image: '/images/ev-tunnel-drive.webp',
+      navLabel: 'Automation',
       eyebrow: 'One connected experience',
-      title: 'From interest to test drive.',
-      description: 'EVA, WhatsApp and n8n work together to qualify leads, schedule test drives and keep your team updated.',
+      title: 'Turn interest into a booked drive.',
+      description: 'EVA, WhatsApp, and n8n coordinate every lead—from the first question to a confirmed test drive and timely team follow-up.',
       metric: '3x', metricLabel: 'Faster follow-up', accent: '#A78BFA',
     },
   ];
@@ -257,7 +275,7 @@ function Hero() {
             <h1>{slide.title}</h1>
             <p>{slide.description}</p>
             <div className="premium-hero__actions">
-              <button type="button" onClick={() => scrollTo('explore-evs')} className="premium-hero__primary">Explore EVs <span>↗</span></button>
+              <button type="button" onClick={() => scrollTo('ev-explorer')} className="premium-hero__primary">Explore EVs <span>↗</span></button>
               <button type="button" onClick={() => scrollTo('voice-agent')} className="premium-hero__secondary">Talk to EVA <span className="premium-hero__pulse" /></button>
             </div>
           </motion.div>
@@ -268,7 +286,7 @@ function Hero() {
           <div className="premium-hero__nav" aria-label="Hero slides">
             {slides.map((item, index) => (
               <button key={item.image} type="button" onClick={() => setActiveSlide(index)} className={index === activeSlide ? 'is-active' : ''} aria-label={`Show slide ${index + 1}`}>
-                <span>{String(index + 1).padStart(2, '0')}</span><i />
+                <span>{String(index + 1).padStart(2, '0')} <b>{item.navLabel}</b></span><i />
               </button>
             ))}
           </div>
@@ -284,48 +302,53 @@ function Hero() {
 // ============================================================
 function Features() {
   const items = [
-    { icon: '🎙️', title: 'AI Voice Calling', desc: 'Autonomous inbound & outbound calls with natural conversation flow', color: '#0066FF' },
-    { icon: '💬', title: 'Omni-Channel Chat', desc: 'Website, WhatsApp & SMS — unified AI agent handles all channels', color: '#00D4FF' },
-    { icon: '📅', title: 'Smart Booking', desc: 'Automated test ride and service appointment scheduling', color: '#00FF88' },
-    { icon: '⚡', title: 'Lead Qualification', desc: 'AI scores and prioritizes high-intent leads instantly', color: '#FFB347' },
-    { icon: '🔋', title: 'Charging Support', desc: '24/7 charging query resolution and station locator', color: '#A78BFA' },
-    { icon: '📊', title: 'Live Analytics', desc: 'Real-time conversions, response metrics and ROI reports', color: '#F472B6' },
-    { icon: '🔗', title: 'CRM Integration', desc: 'Auto-push leads to HubSpot, Salesforce via n8n', color: '#FB923C' },
-    { icon: '🕐', title: 'Always On', desc: 'Zero fatigue, zero delays, zero missed leads ever', color: '#34D399' },
+    { icon: '🎙️', title: 'AI Voice Calling', desc: 'Natural inbound and outbound conversations that sound helpful—not scripted.', color: '#3B82F6' },
+    { icon: '💬', title: 'Omni-Channel Chat', desc: 'One consistent assistant across your website, WhatsApp, and SMS.', color: '#22D3EE' },
+    { icon: '📅', title: 'Smart Booking', desc: 'Turn customer intent into confirmed test rides and service appointments.', color: '#34D399' },
+    { icon: '⚡', title: 'Lead Qualification', desc: 'Detect high-intent conversations and route the right leads instantly.', color: '#FBBF24' },
+    { icon: '🔋', title: 'Charging Support', desc: 'Resolve everyday battery, charging, and station questions around the clock.', color: '#A78BFA' },
+    { icon: '📊', title: 'Live Analytics', desc: 'Track response time, conversion performance, and campaign outcomes.', color: '#F472B6' },
+    { icon: '🔗', title: 'CRM Integration', desc: 'Send enriched lead data to your CRM automatically through n8n.', color: '#FB923C' },
+    { icon: '🕐', title: 'Always On', desc: 'Fast, consistent assistance with no missed follow-up—even after hours.', color: '#2DD4BF' },
   ];
 
   const ref = useRef(null);
   const inView = useInView(ref, { once: true, margin: '-80px' });
 
   return (
-    <section id="features" style={{ padding: '96px 24px', background: '#080C14' }}>
+    <section id="features" className="feature-showcase">
+      <motion.div className="feature-showcase__orb feature-showcase__orb--one" animate={{ x: [0, 70, 0], y: [0, -35, 0] }} transition={{ duration: 12, repeat: Infinity, ease: 'easeInOut' }} />
+      <motion.div className="feature-showcase__orb feature-showcase__orb--two" animate={{ x: [0, -60, 0], y: [0, 45, 0] }} transition={{ duration: 14, repeat: Infinity, ease: 'easeInOut' }} />
       <div style={{ maxWidth: 1200, margin: '0 auto' }}>
 
         {/* Header */}
-        <AnimatedSection style={{ textAlign: 'center', marginBottom: 56 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#00D4FF', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 12 }}>Features</div>
-          <h2 style={{ fontSize: 'clamp(28px,4vw,44px)', fontWeight: 800, color: 'white', marginBottom: 14 }}>Everything your EV business needs</h2>
-          <p style={{ fontSize: 16, color: '#9CA3AF', maxWidth: 520, margin: '0 auto' }}>One AI platform to handle every customer touchpoint.</p>
+        <AnimatedSection className="feature-showcase__header">
+          <div className="feature-showcase__label"><span />Platform capabilities<span /></div>
+          <h2>Every EV conversation.<br /><em>One intelligent system.</em></h2>
+          <p>Connect voice, chat, bookings, automation, and analytics in a customer journey that never loses momentum.</p>
         </AnimatedSection>
 
         {/* Staggered grid */}
         <motion.div
           ref={ref}
-          variants={staggerContainer}
           initial="hidden"
           animate={inView ? 'visible' : 'hidden'}
-          style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}
+          className="feature-showcase__grid"
         >
-          {items.map(({ icon, title, desc, color }) => (
+          {items.map(({ icon, title, desc, color }, index) => (
             <motion.div
               key={title}
-              variants={staggerItem}
-              whileHover={{ y: -6, borderColor: color + '60', boxShadow: `0 20px 40px ${color}18`, transition: { duration: 0.2 } }}
-              style={{ background: '#0D1422', border: '1px solid #1A2540', borderRadius: 14, padding: 22, cursor: 'default' }}
+              custom={index}
+              variants={featureCardVariants}
+              whileHover={{ y: -10, scale: 1.015, transition: { duration: 0.25 } }}
+              className="feature-showcase__card"
+              style={{ '--feature-color': color }}
             >
-              <div style={{ fontSize: 28, marginBottom: 12 }}>{icon}</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: 'white', marginBottom: 7 }}>{title}</div>
-              <div style={{ fontSize: 12, color: '#6B7280', lineHeight: 1.6 }}>{desc}</div>
+              <div className="feature-showcase__number">{String(index + 1).padStart(2, '0')}</div>
+              <motion.div className="feature-showcase__icon" whileHover={{ rotate: [0, -7, 7, 0], scale: 1.08 }}>{icon}</motion.div>
+              <h3>{title}</h3>
+              <p>{desc}</p>
+              <div className="feature-showcase__line" />
             </motion.div>
           ))}
         </motion.div>

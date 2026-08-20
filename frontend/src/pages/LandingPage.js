@@ -187,334 +187,92 @@ function Navbar() {
 // HERO — Fade + Slide Up
 // ============================================================
 function Hero() {
+  const slides = [
+    {
+      image: '/images/ev-city-drive.webp',
+      eyebrow: 'Built for the EV revolution',
+      title: 'Intelligence that moves with you.',
+      description: 'Compare electric vehicles, understand real-world range and turn every customer question into a confident next step.',
+      metric: '24/7', metricLabel: 'AI EV guidance', accent: '#27D8FF',
+    },
+    {
+      image: '/images/ev-mountain-drive.webp',
+      eyebrow: 'Range without the guesswork',
+      title: 'Go farther. Choose smarter.',
+      description: 'Personalised range, charging and ownership insights help every driver find an EV that fits their life.',
+      metric: '< 2 sec', metricLabel: 'Instant answers', accent: '#74F0C2',
+    },
+    {
+      image: '/images/ev-tunnel-drive.webp',
+      eyebrow: 'One connected experience',
+      title: 'From interest to test drive.',
+      description: 'EVA, WhatsApp and n8n work together to qualify leads, schedule test drives and keep your team updated.',
+      metric: '3x', metricLabel: 'Faster follow-up', accent: '#A78BFA',
+    },
+  ];
+  const [activeSlide, setActiveSlide] = useState(0);
+
+  useEffect(() => {
+    const timer = window.setInterval(
+      () => setActiveSlide((current) => (current + 1) % slides.length),
+      6500,
+    );
+    return () => window.clearInterval(timer);
+  }, [slides.length]);
+
   const scrollTo = (id) => {
     document
       .getElementById(id)
       ?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const slide = slides[activeSlide];
   return (
-    <section
-      style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        background:
-          'linear-gradient(180deg, #050810 0%, #080C14 100%)',
-        position: 'relative',
-        overflow: 'hidden',
-        paddingTop: 80,
-      }}
-    >
-      {/* Grid background */}
-      <div
-        style={{
-          position: 'absolute',
-          inset: 0,
-          opacity: 0.4,
-          backgroundImage:
-            'linear-gradient(rgba(0,102,255,0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(0,102,255,0.07) 1px, transparent 1px)',
-          backgroundSize: '40px 40px',
-          pointerEvents: 'none',
-        }}
-      />
+    <section className="premium-hero" aria-label="Electric vehicle showcase">
+      <AnimatePresence mode="sync">
+        <motion.div
+          key={slide.image}
+          className="premium-hero__image"
+          style={{ backgroundImage: `url(${slide.image})` }}
+          initial={{ opacity: 0, scale: 1.08 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ opacity: { duration: 1.2 }, scale: { duration: 7, ease: 'linear' } }}
+        />
+      </AnimatePresence>
+      <div className="premium-hero__shade" />
+      <div className="premium-hero__road-glow" style={{ '--slide-accent': slide.accent }} />
 
-      {/* Main glow */}
-      <div
-        style={{
-          position: 'absolute',
-          top: '-10%',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          width: '85%',
-          height: 650,
-          borderRadius: '50%',
-          background:
-            'radial-gradient(ellipse, rgba(0,102,255,0.18) 0%, transparent 70%)',
-          pointerEvents: 'none',
-        }}
-      />
-
-      <div
-        style={{
-          maxWidth: 1320,
-          width: '100%',
-          margin: '0 auto',
-          padding: '60px 24px',
-          position: 'relative',
-        }}
-      >
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns:
-              'repeat(auto-fit, minmax(340px, 1fr))',
-            gap: 55,
-            alignItems: 'center',
-          }}
-        >
-          {/* Left content */}
+      <div className="premium-hero__content">
+        <AnimatePresence mode="wait">
           <motion.div
-            initial={{ opacity: 0, x: -50 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{
-              duration: 0.8,
-              ease: [0.25, 0.46, 0.45, 0.94],
-            }}
+            key={activeSlide}
+            className="premium-hero__copy"
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -16 }}
+            transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1] }}
           >
-            {/* Badge */}
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 8,
-                background: 'rgba(0,102,255,0.12)',
-                border: '1px solid rgba(0,102,255,0.3)',
-                borderRadius: 20,
-                padding: '6px 14px',
-                marginBottom: 24,
-              }}
-            >
-              <span
-                style={{
-                  width: 7,
-                  height: 7,
-                  background: '#00FF88',
-                  borderRadius: '50%',
-                  animation: 'pulse 2s infinite',
-                }}
-              />
-
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: '#60A5FA',
-                  letterSpacing: '0.1em',
-                  textTransform: 'uppercase',
-                }}
-              >
-                AI Agent Live
-              </span>
-            </div>
-
-            {/* Heading */}
-            <h1
-              style={{
-                fontSize: 'clamp(40px, 5vw, 68px)',
-                fontWeight: 900,
-                color: 'white',
-                lineHeight: 1.08,
-                margin: '0 0 20px',
-                letterSpacing: '-1px',
-              }}
-            >
-              Drive Smarter. Go{' '}
-              <span
-                style={{
-                  background:
-                    'linear-gradient(135deg,#0066FF,#00D4FF,#00FF88)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                }}
-              >
-                Electric.
-              </span>
-            </h1>
-
-            {/* Description */}
-            <p
-              style={{
-                fontSize: 18,
-                color: '#9CA3AF',
-                lineHeight: 1.7,
-                maxWidth: 590,
-                margin: '0 0 32px',
-              }}
-            >
-             Compare range, charging and ownership costs. Get instant EV guidance,
-book a test ride and find the right electric vehicle for your lifestyle.
-            </p>
-
-            {/* Buttons */}
-            <div
-              style={{
-                display: 'flex',
-                gap: 14,
-                flexWrap: 'wrap',
-                marginBottom: 40,
-              }}
-            >
-              <Link
-                to="/login"
-                style={{
-                  background: '#0066FF',
-                  color: 'white',
-                  borderRadius: 10,
-                  padding: '13px 26px',
-                  fontSize: 15,
-                  fontWeight: 700,
-                  textDecoration: 'none',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  boxShadow:
-                    '0 0 30px rgba(0,102,255,0.4)',
-                }}
-              >
-               Explore EVs →
-              </Link>
-
-              <button
-                type="button"
-                onClick={() => scrollTo('voice-agent')}
-                style={{
-                  background: 'rgba(255,107,0,0.12)',
-                  color: '#FF8C40',
-                  border:
-                    '1px solid rgba(255,107,0,0.35)',
-                  borderRadius: 10,
-                  padding: '13px 25px',
-                  fontSize: 15,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                🎙️ Ask EVA
-              </button>
-
-              <button
-                type="button"
-                onClick={() => scrollTo('calculator')}
-                style={{
-                  background: 'transparent',
-                  color: '#00D4FF',
-                  border: '1px solid #1A2540',
-                  borderRadius: 10,
-                  padding: '13px 25px',
-                  fontSize: 15,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                Calculate Savings →
-              </button>
-            </div>
-
-            {/* Stats */}
-            <div
-              style={{
-                display: 'flex',
-                gap: 35,
-                flexWrap: 'wrap',
-                borderTop: '1px solid #1A2540',
-                paddingTop: 28,
-              }}
-            >
-              {[
-                ['24/7', 'AI Support'],
-                ['Instant', 'EV Comparison'],
-                ['Smart', 'Test-Ride Booking'],
-                ['Live', 'Lead Updates'],
-              ].map(([value, label]) => (
-                <div key={label}>
-                  <div
-                    style={{
-                      fontSize: 25,
-                      fontWeight: 800,
-                      color: 'white',
-                    }}
-                  >
-                    {value}
-                  </div>
-
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: '#6B7280',
-                      marginTop: 3,
-                    }}
-                  >
-                    {label}
-                  </div>
-                </div>
-              ))}
+            <div className="premium-hero__eyebrow"><span />{slide.eyebrow}</div>
+            <h1>{slide.title}</h1>
+            <p>{slide.description}</p>
+            <div className="premium-hero__actions">
+              <button type="button" onClick={() => scrollTo('explore-evs')} className="premium-hero__primary">Explore EVs <span>↗</span></button>
+              <button type="button" onClick={() => scrollTo('voice-agent')} className="premium-hero__secondary">Talk to EVA <span className="premium-hero__pulse" /></button>
             </div>
           </motion.div>
+        </AnimatePresence>
 
-          {/* Right 3D car */}
-          <motion.div
-            initial={{ opacity: 0, x: 50, scale: 0.92 }}
-            animate={{ opacity: 1, x: 0, scale: 1 }}
-            transition={{
-              duration: 0.9,
-              delay: 0.2,
-              ease: [0.25, 0.46, 0.45, 0.94],
-            }}
-            style={{
-              position: 'relative',
-              minWidth: 0,
-            }}
-          >
-            <div
-              style={{
-                position: 'absolute',
-                inset: '-20px',
-                background:
-                  'radial-gradient(circle, rgba(0,102,255,0.18), transparent 70%)',
-                filter: 'blur(30px)',
-                pointerEvents: 'none',
-              }}
-            />
-
-            <div style={{ position: 'relative' }}>
-              <iframe
-  title="Interactive 3D EV car"
-  src="https://my.spline.design/untitled-fXdjrtoaVq0ce4fDOioQvNfQ/"
-  frameBorder="0"
-  width="100%"
-  height="500"
-  style={{
-    display: 'block',
-    width: '100%',
-    height: '500px',
-    borderRadius: '24px',
-    background: 'transparent',
-    border: '1px solid rgba(0, 212, 255, 0.18)',
-boxShadow: '0 24px 70px rgba(0, 102, 255, 0.18)',
-  }}
-/>
-            </div>
-
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'center',
-                gap: 10,
-                flexWrap: 'wrap',
-                marginTop: 14,
-              }}
-            >
-              {[
-                'Range Guidance',
-                'Charging Insights',
-                'Test-Ride Booking',
-              ].map((item) => (
-                <span
-                  key={item}
-                  style={{
-                    color: '#9CA3AF',
-                    background: 'rgba(9,20,39,0.85)',
-                    border: '1px solid #1A3155',
-                    borderRadius: 20,
-                    padding: '7px 12px',
-                    fontSize: 11,
-                  }}
-                >
-                  {item}
-                </span>
-              ))}
-            </div>
-          </motion.div>
+        <div className="premium-hero__footer">
+          <div className="premium-hero__metric"><strong>{slide.metric}</strong><span>{slide.metricLabel}</span></div>
+          <div className="premium-hero__nav" aria-label="Hero slides">
+            {slides.map((item, index) => (
+              <button key={item.image} type="button" onClick={() => setActiveSlide(index)} className={index === activeSlide ? 'is-active' : ''} aria-label={`Show slide ${index + 1}`}>
+                <span>{String(index + 1).padStart(2, '0')}</span><i />
+              </button>
+            ))}
+          </div>
+          <div className="premium-hero__scroll">Scroll to discover <span>↓</span></div>
         </div>
       </div>
     </section>
@@ -1302,4 +1060,3 @@ export default function LandingPage() {
     </div>
   );
 }
-

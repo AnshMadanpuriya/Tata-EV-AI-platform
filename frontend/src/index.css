@@ -229,17 +229,3 @@ input[type=number] { -moz-appearance: textfield; }
     linear-gradient(90deg, rgba(0,102,255,0.05) 1px, transparent 1px);
   background-size: 40px 40px;
 }
-
-/* ============================================================
-   ELEVENLABS WIDGET — BOTTOM-LEFT POSITION
-   Replaces the removed orange mic button's spot.
-   Pink chat button stays untouched at bottom-right.
-   ============================================================ */
-
-/* elevenlabs-convai {
-  position: fixed !important;
-  bottom: 20px !important;
-  left: 20px !important;
-  right: auto !important;
-  z-index: 9998 !important;
-} */

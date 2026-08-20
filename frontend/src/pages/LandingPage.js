@@ -12,8 +12,6 @@ import { EVExplorer, EVComparator } from '../components/Landing/EvFeatures';
 // ============================================================
 // CONSTANTS
 // ============================================================
-const AGENT_ID = 'agent_6701knpzdtj4fjy85jkrc0kbqye9';
-const ELEVENLABS_SCRIPT = 'https://unpkg.com/@elevenlabs/convai-widget-embed';
 const API_URL = 'http://localhost:5000/api';
 
 // ============================================================
@@ -143,52 +141,6 @@ function StaggerSection({ children, style, className }) {
     >
       {children}
     </motion.div>
-  );
-}
-
-// ============================================================
-// ELEVENLABS LOADER
-// ============================================================
-function loadElevenLabsScript(cb) {
-  if (document.querySelector('script[data-el-loaded]')) {
-    if (cb) cb(); return;
-  }
-  const s = document.createElement('script');
-  s.src = ELEVENLABS_SCRIPT;
-  s.async = true;
-  s.type = 'text/javascript';
-  s.setAttribute('data-el-loaded', 'true');
-  s.onload = () => { if (cb) cb(); };
-  document.head.appendChild(s);
-}
-
-function ElevenLabsEmbed({ agentId }) {
-  const ref = useRef(null);
-  const widgetRef = useRef(null);
-  const [ready, setReady] = useState(false);
-  useEffect(() => { loadElevenLabsScript(() => setReady(true)); }, []);
-  useEffect(() => {
-    if (!ready || !ref.current || widgetRef.current) return;
-    const el = document.createElement('elevenlabs-convai');
-    el.setAttribute('agent-id', agentId);
-    el.style.width = '100%';
-    ref.current.appendChild(el);
-    widgetRef.current = el;
-    return () => {
-      if (widgetRef.current && ref.current?.contains(widgetRef.current)) {
-        ref.current.removeChild(widgetRef.current);
-      }
-      widgetRef.current = null;
-    };
-  }, [ready, agentId]);
-  return (
-    <div ref={ref} style={{ width: '100%', minHeight: 80 }}>
-      {!ready && (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: 20 }}>
-          <div style={{ width: 28, height: 28, border: '2px solid #FF6B00', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -580,11 +532,7 @@ function VoiceAgentSection() {
                   <div key={i} style={{ width: 3, borderRadius: 2, background: `rgba(255,107,0,${0.35 + (h/100)*0.65})`, height: h * 0.48, animation: `barwave ${0.9+(i%3)*0.2}s ease-in-out infinite`, animationDelay: `${i*0.08}s`, transformOrigin: 'center' }} />
                 ))}
               </div>
-              <p style={{ fontSize: 12, color: '#6B7280', margin: 0 }}>Click mic → speak naturally</p>
-            </div>
-            <div style={{ padding: '16px 20px', background: '#0D1422' }}>
-              <ElevenLabsEmbed agentId={AGENT_ID} />
-              <p style={{ fontSize: 10, color: '#374151', textAlign: 'center', marginTop: 8, fontFamily: 'monospace' }}>Allow microphone when browser asks</p>
+              <p style={{ fontSize: 12, color: '#6B7280', margin: 0 }}>Use “Start a call” in the bottom-right corner</p>
             </div>
           </motion.div>
 

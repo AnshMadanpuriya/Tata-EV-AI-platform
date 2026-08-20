@@ -234,7 +234,6 @@ export default function EVChatbot() {
       {isOpen && (
         <section
           className="ev-chat-window"
-          data-lenis-prevent
           onWheel={(event) => event.stopPropagation()}
         >
           <header className="ev-chat-header">
@@ -283,7 +282,6 @@ export default function EVChatbot() {
           <div
             ref={messagesContainerRef}
             className="ev-chat-messages"
-            data-lenis-prevent
             onWheel={(event) => event.stopPropagation()}
           >
             {messages.map((message) => (

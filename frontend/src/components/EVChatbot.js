@@ -69,12 +69,22 @@ export default function EVChatbot() {
   const [loading, setLoading] = useState(false);
   const [service, setService] = useState("checking");
 
-  const messagesEndRef = useRef(null);
+  const messagesContainerRef = useRef(null);
   const inputRef = useRef(null);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+    const container = messagesContainerRef.current;
+    if (!container || !isOpen) return undefined;
+
+    const frame = window.requestAnimationFrame(() => {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: "smooth",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [messages, loading, isOpen]);
 
   useEffect(() => {
     if (isOpen) {
@@ -85,26 +95,29 @@ export default function EVChatbot() {
   const checkServices = useCallback(async () => {
     setService("checking");
 
-    const isHealthy = async (url) => {
+    const readHealth = async (url) => {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 2500);
 
       try {
         const response = await fetch(url, { signal: controller.signal });
-        return response.ok;
+        if (!response.ok) return null;
+        return await response.json();
       } catch {
-        return false;
+        return null;
       } finally {
         clearTimeout(timeout);
       }
     };
 
-    if (await isHealthy(`${RAG_API_URL}/health`)) {
-      setService("rag");
+    const ragHealth = await readHealth(`${RAG_API_URL}/health`);
+
+    if (ragHealth && ragHealth.ready !== false) {
+      setService(ragHealth.mode === "mistral" ? "mistral" : "rag");
       return;
     }
 
-    if (await isHealthy(`${NODE_API_URL}/health`)) {
+    if (await readHealth(`${NODE_API_URL}/health`)) {
       setService("fallback");
       return;
     }
@@ -141,28 +154,45 @@ export default function EVChatbot() {
     setLoading(true);
 
     try {
+      const history = messages.slice(-8).map((message) => ({
+        role: message.role,
+        content: message.text,
+      }));
       const services = [
-        { url: `${RAG_API_URL}/chat`, answerKey: "answer", status: "rag" },
-        { url: `${NODE_API_URL}/chat`, answerKey: "response", status: "fallback" },
+        { url: `${RAG_API_URL}/chat`, answerKey: "answer", status: "rag", timeout: 30000 },
+        { url: `${NODE_API_URL}/chat`, answerKey: "response", status: "fallback", timeout: 7000 },
       ];
       let answer = "";
 
       for (const current of services) {
+        const controller = new AbortController();
+        const timeout = window.setTimeout(
+          () => controller.abort(),
+          current.timeout,
+        );
+
         try {
           const response = await fetch(current.url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: question }),
+            body: JSON.stringify({ message: question, history }),
+            signal: controller.signal,
           });
           const data = await response.json();
 
           if (response.ok && data[current.answerKey]) {
             answer = data[current.answerKey];
-            setService(current.status);
+            setService(
+              current.status === "rag" && data.mode === "mistral"
+                ? "mistral"
+                : current.status,
+            );
             break;
           }
         } catch {
           // Try the next available service.
+        } finally {
+          window.clearTimeout(timeout);
         }
       }
 
@@ -202,7 +232,11 @@ export default function EVChatbot() {
   return (
     <div className="ev-chatbot-root">
       {isOpen && (
-        <section className="ev-chat-window">
+        <section
+          className="ev-chat-window"
+          data-lenis-prevent
+          onWheel={(event) => event.stopPropagation()}
+        >
           <header className="ev-chat-header">
             <div className="ev-chat-agent">
               <img
@@ -217,7 +251,8 @@ export default function EVChatbot() {
                 <div className={`ev-chat-status ${service}`}>
                   <span className="ev-status-dot" />
                   {service === "rag" && "RAG Assistant Online"}
-                  {service === "fallback" && "Smart Assistant Online"}
+                  {service === "mistral" && "Mistral Assistant Online"}
+                  {service === "fallback" && "Basic fallback online"}
                   {service === "checking" && "Checking AI service..."}
                   {service === "offline" && "AI service offline"}
                 </div>
@@ -245,7 +280,12 @@ export default function EVChatbot() {
             </div>
           </header>
 
-          <div className="ev-chat-messages">
+          <div
+            ref={messagesContainerRef}
+            className="ev-chat-messages"
+            data-lenis-prevent
+            onWheel={(event) => event.stopPropagation()}
+          >
             {messages.map((message) => (
               <div
                 className={`ev-message-row ${message.role} ${
@@ -282,8 +322,6 @@ export default function EVChatbot() {
                 </div>
               </div>
             )}
-
-            <div ref={messagesEndRef} />
           </div>
 
           <div className="ev-suggestions">
@@ -329,7 +367,13 @@ export default function EVChatbot() {
             </button>
           </footer>
 
-          <div className="ev-chat-powered">Powered by Mistral AI + RAG</div>
+          <div className="ev-chat-powered">
+            {service === "fallback"
+              ? "Basic Node fallback · Start RAG for full AI answers"
+              : service === "mistral"
+                ? "Powered by Mistral AI"
+                : "Powered by Mistral AI + RAG"}
+          </div>
         </section>
       )}
 

@@ -8,12 +8,12 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_mistralai import MistralAIEmbeddings
 from langchain_chroma import Chroma
 
-
-load_dotenv()
-
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 CHROMA_DIR = BASE_DIR / "chroma_db"
+
+load_dotenv(BASE_DIR.parent / ".env")
+load_dotenv(BASE_DIR / ".env", override=True)
 
 
 def load_all_documents():

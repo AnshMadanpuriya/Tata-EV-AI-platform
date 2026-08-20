@@ -1,6 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { motion, useInView, AnimatePresence } from 'framer-motion';
+import {
+  motion,
+  useInView,
+  useReducedMotion,
+  useScroll,
+  useTransform,
+  AnimatePresence,
+} from 'framer-motion';
 import { EVExplorer, EVComparator } from '../components/Landing/EvFeatures';
 // ============================================================
 // CONSTANTS
@@ -13,18 +20,24 @@ const API_URL = 'http://localhost:5000/api';
 // REUSABLE ANIMATION VARIANTS
 // ============================================================
 const fadeUp = {
-  hidden: { opacity: 0, y: 40 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.7, ease: [0.25, 0.46, 0.45, 0.94] } },
+  hidden: { opacity: 0, y: 58, scale: 0.98, filter: 'blur(10px)' },
+  visible: {
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    filter: 'blur(0px)',
+    transition: { duration: 0.85, ease: [0.22, 1, 0.36, 1] },
+  },
 };
 
 const fadeLeft = {
-  hidden: { opacity: 0, x: -50 },
-  visible: { opacity: 1, x: 0, transition: { duration: 0.7, ease: [0.25, 0.46, 0.45, 0.94] } },
+  hidden: { opacity: 0, x: -72, rotateY: -5, filter: 'blur(10px)' },
+  visible: { opacity: 1, x: 0, rotateY: 0, filter: 'blur(0px)', transition: { duration: 0.9, ease: [0.22, 1, 0.36, 1] } },
 };
 
 const fadeRight = {
-  hidden: { opacity: 0, x: 50 },
-  visible: { opacity: 1, x: 0, transition: { duration: 0.7, ease: [0.25, 0.46, 0.45, 0.94] } },
+  hidden: { opacity: 0, x: 72, rotateY: 5, filter: 'blur(10px)' },
+  visible: { opacity: 1, x: 0, rotateY: 0, filter: 'blur(0px)', transition: { duration: 0.9, ease: [0.22, 1, 0.36, 1] } },
 };
 
 const fadeIn = {
@@ -33,8 +46,8 @@ const fadeIn = {
 };
 
 const scaleIn = {
-  hidden: { opacity: 0, scale: 0.92 },
-  visible: { opacity: 1, scale: 1, transition: { duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] } },
+  hidden: { opacity: 0, scale: 0.9, filter: 'blur(8px)' },
+  visible: { opacity: 1, scale: 1, filter: 'blur(0px)', transition: { duration: 0.8, ease: [0.22, 1, 0.36, 1] } },
 };
 
 const staggerContainer = {
@@ -43,8 +56,8 @@ const staggerContainer = {
 };
 
 const staggerItem = {
-  hidden: { opacity: 0, y: 30 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] } },
+  hidden: { opacity: 0, y: 42, scale: 0.96, filter: 'blur(7px)' },
+  visible: { opacity: 1, y: 0, scale: 1, filter: 'blur(0px)', transition: { duration: 0.7, ease: [0.22, 1, 0.36, 1] } },
 };
 
 const featureCardVariants = {
@@ -62,12 +75,45 @@ const featureCardVariants = {
   }),
 };
 
+const heroCopyVariants = {
+  hidden: {},
+  visible: { transition: { staggerChildren: 0.085, delayChildren: 0.08 } },
+  exit: { transition: { staggerChildren: 0.035, staggerDirection: -1 } },
+};
+
+const heroItemVariants = {
+  hidden: { opacity: 0, y: 30, filter: 'blur(9px)' },
+  visible: {
+    opacity: 1,
+    y: 0,
+    filter: 'blur(0px)',
+    transition: { duration: 0.72, ease: [0.22, 1, 0.36, 1] },
+  },
+  exit: { opacity: 0, y: -18, filter: 'blur(6px)', transition: { duration: 0.28 } },
+};
+
+const processCardVariants = {
+  hidden: { opacity: 0, y: 76, scale: 0.9, rotateX: 12, filter: 'blur(10px)' },
+  visible: (index) => ({
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    rotateX: 0,
+    filter: 'blur(0px)',
+    transition: {
+      delay: index * 0.16,
+      duration: 0.82,
+      ease: [0.22, 1, 0.36, 1],
+    },
+  }),
+};
+
 // ============================================================
 // REUSABLE ANIMATED SECTION WRAPPER
 // ============================================================
-function AnimatedSection({ children, variants = fadeUp, className, style, once = true }) {
+function AnimatedSection({ children, variants = fadeUp, className, style, once = false }) {
   const ref = useRef(null);
-  const inView = useInView(ref, { once, margin: '-80px' });
+  const inView = useInView(ref, { once, margin: '-10% 0px -10% 0px' });
   return (
     <motion.div
       ref={ref}
@@ -75,7 +121,7 @@ function AnimatedSection({ children, variants = fadeUp, className, style, once =
       initial="hidden"
       animate={inView ? 'visible' : 'hidden'}
       className={className}
-      style={style}
+      style={{ willChange: 'transform, opacity, filter', ...style }}
     >
       {children}
     </motion.div>
@@ -85,7 +131,7 @@ function AnimatedSection({ children, variants = fadeUp, className, style, once =
 // Stagger wrapper — animates children with stagger
 function StaggerSection({ children, style, className }) {
   const ref = useRef(null);
-  const inView = useInView(ref, { once: true, margin: '-60px' });
+  const inView = useInView(ref, { once: false, margin: '-8% 0px -8% 0px' });
   return (
     <motion.div
       ref={ref}
@@ -229,6 +275,15 @@ function Hero() {
     },
   ];
   const [activeSlide, setActiveSlide] = useState(0);
+  const heroRef = useRef(null);
+  const reduceMotion = useReducedMotion();
+  const { scrollYProgress } = useScroll({
+    target: heroRef,
+    offset: ['start start', 'end start'],
+  });
+  const visualY = useTransform(scrollYProgress, [0, 1], [0, reduceMotion ? 0 : 105]);
+  const contentY = useTransform(scrollYProgress, [0, 1], [0, reduceMotion ? 0 : -72]);
+  const contentOpacity = useTransform(scrollYProgress, [0, 0.72, 1], [1, 0.92, 0.12]);
 
   useEffect(() => {
     const timer = window.setInterval(
@@ -246,43 +301,64 @@ function Hero() {
 
   const slide = slides[activeSlide];
   return (
-    <section className="premium-hero" aria-label="Electric vehicle showcase">
-      <AnimatePresence mode="sync">
-        <motion.div
-          key={slide.image}
-          className="premium-hero__image"
-          style={{ backgroundImage: `url(${slide.image})` }}
-          initial={{ opacity: 0, scale: 1.08 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ opacity: { duration: 1.2 }, scale: { duration: 7, ease: 'linear' } }}
-        />
-      </AnimatePresence>
+    <section ref={heroRef} className="premium-hero" aria-label="Electric vehicle showcase">
+      <motion.div className="premium-hero__visual" style={{ y: visualY }}>
+        <AnimatePresence mode="sync">
+          <motion.div
+            key={slide.image}
+            className="premium-hero__image"
+            style={{ backgroundImage: `url(${slide.image})` }}
+            initial={{
+              opacity: 0,
+              scale: reduceMotion ? 1 : 1.12,
+              x: reduceMotion ? 0 : activeSlide % 2 === 0 ? '1.5%' : '-1.5%',
+            }}
+            animate={{ opacity: 1, scale: 1.025, x: 0 }}
+            exit={{ opacity: 0, scale: 1.045 }}
+            transition={{
+              opacity: { duration: reduceMotion ? 0.15 : 1.05 },
+              scale: { duration: reduceMotion ? 0.15 : 7.2, ease: 'linear' },
+              x: { duration: reduceMotion ? 0.15 : 7.2, ease: 'linear' },
+            }}
+          />
+        </AnimatePresence>
+      </motion.div>
       <div className="premium-hero__shade" />
       <div className="premium-hero__road-glow" style={{ '--slide-accent': slide.accent }} />
 
-      <div className="premium-hero__content">
+      <motion.div className="premium-hero__content" style={{ y: contentY, opacity: contentOpacity }}>
         <AnimatePresence mode="wait">
           <motion.div
             key={activeSlide}
             className="premium-hero__copy"
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -16 }}
-            transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1] }}
+            variants={heroCopyVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
           >
-            <div className="premium-hero__eyebrow"><span />{slide.eyebrow}</div>
-            <h1>{slide.title}</h1>
-            <p>{slide.description}</p>
-            <div className="premium-hero__actions">
+            <motion.div variants={heroItemVariants} className="premium-hero__eyebrow"><span />{slide.eyebrow}</motion.div>
+            <motion.h1 variants={heroItemVariants}>{slide.title}</motion.h1>
+            <motion.p variants={heroItemVariants}>{slide.description}</motion.p>
+            <motion.div variants={heroItemVariants} className="premium-hero__actions">
               <button type="button" onClick={() => scrollTo('ev-explorer')} className="premium-hero__primary">Explore EVs <span>↗</span></button>
               <button type="button" onClick={() => scrollTo('voice-agent')} className="premium-hero__secondary">Talk to EVA <span className="premium-hero__pulse" /></button>
-            </div>
+            </motion.div>
           </motion.div>
         </AnimatePresence>
 
         <div className="premium-hero__footer">
-          <div className="premium-hero__metric"><strong>{slide.metric}</strong><span>{slide.metricLabel}</span></div>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={`${slide.metric}-${slide.metricLabel}`}
+              className="premium-hero__metric"
+              initial={{ opacity: 0, x: -18 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 12 }}
+              transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <strong>{slide.metric}</strong><span>{slide.metricLabel}</span>
+            </motion.div>
+          </AnimatePresence>
           <div className="premium-hero__nav" aria-label="Hero slides">
             {slides.map((item, index) => (
               <button key={item.image} type="button" onClick={() => setActiveSlide(index)} className={index === activeSlide ? 'is-active' : ''} aria-label={`Show slide ${index + 1}`}>
@@ -292,7 +368,7 @@ function Hero() {
           </div>
           <div className="premium-hero__scroll">Scroll to discover <span>↓</span></div>
         </div>
-      </div>
+      </motion.div>
     </section>
   );
 }
@@ -313,7 +389,7 @@ function Features() {
   ];
 
   const ref = useRef(null);
-  const inView = useInView(ref, { once: true, margin: '-80px' });
+  const inView = useInView(ref, { once: false, margin: '-80px' });
 
   return (
     <section id="features" className="feature-showcase">
@@ -362,44 +438,68 @@ function Features() {
 // ============================================================
 function HowItWorks() {
   const steps = [
-    { num: '01', icon: '💬', title: 'Customer Reaches Out', desc: 'Via chat, voice, or WhatsApp. AI activates instantly — no wait time.' },
-    { num: '02', icon: '🧠', title: 'AI Processes via n8n', desc: 'Intent detected, context understood, response in under 2 seconds.' },
-    { num: '03', icon: '✅', title: 'Lead Captured & Converted', desc: 'Bookings confirmed, leads saved, hot prospects escalated to humans.' },
+    { num: '01', icon: '💬', title: 'Customer Reaches Out', desc: 'Chat, voice, or WhatsApp activates the AI instantly—without queues or missed intent.', color: '#32B7FF' },
+    { num: '02', icon: '🧠', title: 'AI Processes via n8n', desc: 'Intent, context, and lead signals move through the right automation in seconds.', color: '#A78BFA' },
+    { num: '03', icon: '✅', title: 'Lead Captured & Converted', desc: 'Bookings are confirmed, lead data is saved, and hot prospects reach your team.', color: '#35E6A7' },
   ];
 
   const ref = useRef(null);
-  const inView = useInView(ref, { once: true, margin: '-80px' });
+  const inView = useInView(ref, { once: false, margin: '-12% 0px -12% 0px' });
 
   return (
-    <section id="how-it-works" style={{ padding: '96px 24px', background: '#050810' }}>
-      <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+    <section id="how-it-works" className="how-showcase">
+      <motion.div
+        className="how-showcase__orb how-showcase__orb--one"
+        animate={{ x: [0, 70, 0], y: [0, -34, 0], scale: [1, 1.12, 1] }}
+        transition={{ duration: 13, repeat: Infinity, ease: 'easeInOut' }}
+      />
+      <motion.div
+        className="how-showcase__orb how-showcase__orb--two"
+        animate={{ x: [0, -55, 0], y: [0, 42, 0], scale: [1.08, 0.92, 1.08] }}
+        transition={{ duration: 15, repeat: Infinity, ease: 'easeInOut' }}
+      />
+      <div ref={ref} className="how-showcase__inner">
 
-        <AnimatedSection style={{ textAlign: 'center', marginBottom: 56 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#00D4FF', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 12 }}>How It Works</div>
-          <h2 style={{ fontSize: 'clamp(28px,4vw,44px)', fontWeight: 800, color: 'white', marginBottom: 14 }}>
+        <AnimatedSection className="how-showcase__header">
+          <div className="how-showcase__label"><span />How It Works<span /></div>
+          <h2>
             From inquiry to conversion in{' '}
-            <span style={{ background: 'linear-gradient(135deg,#0066FF,#00D4FF)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>3 steps</span>
+            <span>3 steps</span>
           </h2>
+          <p>Every interaction moves through one connected, visible customer journey.</p>
         </AnimatedSection>
 
         <motion.div
-          ref={ref}
-          variants={staggerContainer}
+          className="how-showcase__grid"
           initial="hidden"
           animate={inView ? 'visible' : 'hidden'}
-          style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 24 }}
         >
-          {steps.map(({ num, icon, title, desc }) => (
+          <motion.div
+            className="how-showcase__connector"
+            initial={{ scaleX: 0, opacity: 0 }}
+            animate={inView ? { scaleX: 1, opacity: 1 } : { scaleX: 0, opacity: 0 }}
+            transition={{ duration: 1.15, delay: 0.38, ease: [0.22, 1, 0.36, 1] }}
+          />
+          {steps.map(({ num, icon, title, desc, color }, index) => (
             <motion.div
               key={num}
-              variants={staggerItem}
-              whileHover={{ y: -4, transition: { duration: 0.2 } }}
-              style={{ background: '#0D1422', border: '1px solid #1A2540', borderRadius: 16, padding: 28, textAlign: 'center' }}
+              custom={index}
+              variants={processCardVariants}
+              whileHover={{ y: -12, scale: 1.018, rotateX: -1.5, transition: { duration: 0.28 } }}
+              className="how-showcase__card"
+              style={{ '--step-color': color }}
             >
-              <div style={{ fontSize: 40, marginBottom: 16 }}>{icon}</div>
-              <div style={{ fontSize: 10, color: '#6B7280', fontFamily: 'monospace', marginBottom: 8 }}>{num}</div>
-              <div style={{ fontSize: 17, fontWeight: 700, color: 'white', marginBottom: 10 }}>{title}</div>
-              <div style={{ fontSize: 13, color: '#9CA3AF', lineHeight: 1.7 }}>{desc}</div>
+              <div className="how-showcase__topline"><span>STEP</span><strong>{num}</strong></div>
+              <motion.div
+                className="how-showcase__icon"
+                animate={inView ? { y: [0, -7, 0], rotate: [0, -3, 3, 0] } : {}}
+                transition={{ duration: 3.6 + index * 0.35, repeat: Infinity, ease: 'easeInOut', delay: index * 0.4 }}
+              >
+                {icon}
+              </motion.div>
+              <h3>{title}</h3>
+              <p>{desc}</p>
+              <div className="how-showcase__signal"><i /><i /><i /></div>
             </motion.div>
           ))}
         </motion.div>
@@ -422,41 +522,44 @@ function VoiceAgentSection() {
   ];
 
   const ref = useRef(null);
-  const inView = useInView(ref, { once: true, margin: '-80px' });
+  const inView = useInView(ref, { once: false, margin: '-12% 0px -12% 0px' });
 
   return (
-    <section id="voice-agent" style={{ padding: '96px 24px', background: '#080C14', position: 'relative', overflow: 'hidden' }}>
-      <div style={{
-        position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
-        width: 700, height: 400, borderRadius: '50%', pointerEvents: 'none',
-        background: 'radial-gradient(ellipse, rgba(255,107,0,0.06) 0%, transparent 70%)'
-      }} />
+    <section id="voice-agent" className="voice-showcase">
+      <motion.div
+        className="voice-showcase__halo"
+        style={{ x: '-50%', y: '-50%' }}
+        animate={{ scale: [0.94, 1.08, 0.94], opacity: [0.34, 0.58, 0.34], rotate: [0, 8, 0] }}
+        transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
+      />
+      <div className="voice-showcase__rings"><i /><i /><i /></div>
 
-      <div style={{ maxWidth: 1200, margin: '0 auto', position: 'relative' }} ref={ref}>
+      <div className="voice-showcase__inner" ref={ref}>
 
         {/* Header */}
-        <AnimatedSection style={{ textAlign: 'center', marginBottom: 56 }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'rgba(255,107,0,0.1)', border: '1px solid rgba(255,107,0,0.25)', borderRadius: 20, padding: '5px 14px', marginBottom: 16 }}>
-            <span style={{ width: 7, height: 7, background: '#FF6B00', borderRadius: '50%', animation: 'pulse 2s infinite', display: 'inline-block' }} />
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#FF8C40', letterSpacing: '0.1em', textTransform: 'uppercase' }}>ElevenLabs Voice AI · Live</span>
+        <AnimatedSection className="voice-showcase__header">
+          <div className="voice-showcase__badge">
+            <span />
+            ElevenLabs Voice AI · Live
           </div>
-          <h2 style={{ fontSize: 'clamp(28px,4vw,44px)', fontWeight: 800, color: 'white', marginBottom: 14 }}>
+          <h2>
             Talk to our AI Agent —{' '}
-            <span style={{ background: 'linear-gradient(135deg,#FF6B00,#FFB347)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Right Now</span>
+            <span>Right Now</span>
           </h2>
-          <p style={{ fontSize: 16, color: '#9CA3AF', maxWidth: 520, margin: '0 auto' }}>
+          <p>
             Powered by ElevenLabs ConvAI. Have a real voice conversation — no typing needed.
           </p>
         </AnimatedSection>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 48, alignItems: 'center' }}>
+        <div className="voice-showcase__layout">
 
           {/* Widget — slides from left */}
           <motion.div
             variants={fadeLeft}
             initial="hidden"
             animate={inView ? 'visible' : 'hidden'}
-            style={{ background: '#0D1422', border: '1px solid rgba(255,107,0,0.22)', borderRadius: 20, overflow: 'hidden', boxShadow: '0 0 50px rgba(255,107,0,0.1)' }}
+            whileHover={{ y: -7, rotateY: 1.2, transition: { duration: 0.3 } }}
+            className="voice-showcase__widget"
           >
             <div style={{ padding: '16px 20px', background: 'rgba(255,107,0,0.04)', borderBottom: '1px solid rgba(255,107,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -490,6 +593,7 @@ function VoiceAgentSection() {
             variants={fadeRight}
             initial="hidden"
             animate={inView ? 'visible' : 'hidden'}
+            className="voice-showcase__copy"
           >
             <h3 style={{ fontSize: 'clamp(22px,3vw,32px)', fontWeight: 800, color: 'white', marginBottom: 24 }}>
               Just speak naturally —<br /><span style={{ color: '#9CA3AF' }}>the AI handles the rest</span>
@@ -501,8 +605,8 @@ function VoiceAgentSection() {
               style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 28 }}
             >
               {capabilities.map((cap, i) => (
-                <motion.div key={i} variants={staggerItem} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ color: '#FF6B00', flexShrink: 0, fontSize: 16 }}>✓</span>
+                <motion.div key={i} variants={staggerItem} whileHover={{ x: 7 }} className="voice-showcase__capability">
+                  <span>✓</span>
                   <span style={{ fontSize: 14, color: '#D1D5DB' }}>{cap}</span>
                 </motion.div>
               ))}

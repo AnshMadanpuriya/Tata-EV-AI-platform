@@ -121,11 +121,12 @@ The app will open at **http://localhost:3000**
 ```bash
 copy rag-service\.env.example rag-service\.env
 npm run setup:rag
-npm run rag:ingest
 npm run rag:start
 ```
 
-Add your Mistral API key to `rag-service/.env` before ingestion. The RAG API runs at **http://localhost:8000**. If it is unavailable, the website chatbot automatically uses the Node assistant on port 5000.
+Add your Mistral API key to `rag-service/.env`. The assistant can now answer general EV questions through Mistral immediately. For grounded answers from the included EV documents, run `npm run rag:ingest` once before `npm run rag:start`.
+
+The AI API runs at **http://localhost:8000**. Its `/health` response reports `mistral`, `rag`, or `setup-required` mode. If the Python service is unavailable, the website clearly switches to the limited Node fallback on port 5000.
 
 ---
 

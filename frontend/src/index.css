@@ -4,15 +4,28 @@
 
 @layer base {
   * { box-sizing: border-box; }
-html { scroll-behavior: smooth; scroll-padding-top: 78px; }
-section[id] { scroll-margin-top: 72px; }
+  html {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+    scroll-behavior: smooth;
+    scroll-padding-top: 78px;
+  }
+  body, #root {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+  section[id] { scroll-margin-top: 72px; }
   body {
+    margin: 0;
     background-color: #080C14;
     color: #E8EDF5;
     font-family: 'DM Sans', sans-serif;
     -webkit-font-smoothing: antialiased;
   }
   ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar:horizontal { height: 0; }
   ::-webkit-scrollbar-track { background: #080C14; }
   ::-webkit-scrollbar-thumb { background: #1A2540; border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: #0066FF; }

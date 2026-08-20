@@ -7,14 +7,19 @@
   html {
     width: 100%;
     max-width: 100%;
-    overflow-x: hidden;
+    overflow-x: clip;
     scroll-behavior: smooth;
     scroll-padding-top: 78px;
   }
-  body, #root {
+  body {
     width: 100%;
     max-width: 100%;
-    overflow-x: hidden;
+    overflow-x: clip;
+  }
+  #root {
+    width: 100%;
+    max-width: 100%;
+    overflow: visible;
   }
   section[id] { scroll-margin-top: 72px; }
   body {

@@ -1,20 +1,16 @@
 #tataev-voice-agent {
-  position: fixed;
-  inset: auto 24px 24px auto !important;
-  left: auto !important;
-  right: 24px !important;
-  bottom: 24px !important;
+  position: fixed !important;
+  inset: 0 !important;
   z-index: 100000 !important;
-  display: block !important;
-  overflow: visible !important;
+  width: auto !important;
+  height: auto !important;
   margin: 0 !important;
-  pointer-events: auto !important;
+  overflow: visible !important;
+  pointer-events: none !important;
+  opacity: 1;
+  transition: opacity 0.18s ease;
 }
 
-@media (max-width: 540px) {
-  #tataev-voice-agent {
-    inset: auto 12px 12px auto !important;
-    right: 12px !important;
-    bottom: 12px !important;
-  }
+#tataev-voice-agent[data-initial-state='loading'] {
+  opacity: 0;
 }

@@ -117,8 +117,12 @@ export default function EVChatbot() {
       return;
     }
 
-    if (await readHealth(`${NODE_API_URL}/health`)) {
-      setService("fallback");
+    const nodeHealth = await readHealth(`${NODE_API_URL}/health`);
+
+    if (nodeHealth) {
+      setService(
+        nodeHealth.assistant?.mode === "mistral" ? "mistral" : "fallback",
+      );
       return;
     }
 
@@ -182,11 +186,13 @@ export default function EVChatbot() {
 
           if (response.ok && data[current.answerKey]) {
             answer = data[current.answerKey];
-            setService(
-              current.status === "rag" && data.mode === "mistral"
-                ? "mistral"
-                : current.status,
-            );
+            if (data.mode === "mistral") {
+              setService("mistral");
+            } else if (current.status === "rag") {
+              setService("rag");
+            } else {
+              setService("fallback");
+            }
             break;
           }
         } catch {
@@ -251,7 +257,7 @@ export default function EVChatbot() {
                   <span className="ev-status-dot" />
                   {service === "rag" && "RAG Assistant Online"}
                   {service === "mistral" && "Mistral Assistant Online"}
-                  {service === "fallback" && "Basic fallback online"}
+                  {service === "fallback" && "Local EV Assistant Online"}
                   {service === "checking" && "Checking AI service..."}
                   {service === "offline" && "AI service offline"}
                 </div>
@@ -367,7 +373,7 @@ export default function EVChatbot() {
 
           <div className="ev-chat-powered">
             {service === "fallback"
-              ? "Basic Node fallback · Start RAG for full AI answers"
+              ? "Grounded local EV knowledge"
               : service === "mistral"
                 ? "Powered by Mistral AI"
                 : "Powered by Mistral AI + RAG"}

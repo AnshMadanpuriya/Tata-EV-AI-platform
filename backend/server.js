@@ -9,7 +9,15 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
-require('dotenv').config();
+const path = require('path');
+const dotenv = require('dotenv');
+
+// Load environment files from deterministic locations. This lets the Node
+// fallback use the same Mistral key as the Python RAG service even when the
+// backend is started from the repository root.
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+dotenv.config({ path: path.resolve(__dirname, '../rag-service/.env'), override: true });
+dotenv.config({ path: path.resolve(__dirname, '.env'), override: true });
 
 const app = express();
 
@@ -23,6 +31,9 @@ const JWT_SECRET = process.env.JWT_SECRET || 'tatamotors_ev_secret_2025';
 const N8N_BOOKING_WEBHOOK = process.env.N8N_BOOKING_WEBHOOK_URL || '';
 const EV_API_KEY = process.env.EV_API_KEY || '';
 const EV_API_BASE = 'https://api.api-ninjas.com/v1';
+const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY || '';
+const MISTRAL_CHAT_MODEL = process.env.MISTRAL_CHAT_MODEL || 'mistral-small-latest';
+const MISTRAL_CHAT_URL = 'https://api.mistral.ai/v1/chat/completions';
 
 mongoose.connect(MONGO_URI)
   .then(() => console.log('✅ MongoDB Connected:', MONGO_URI))
@@ -132,6 +143,178 @@ const INDIAN_EV_DATABASE = [
   { make: 'TVS', model: 'iQube', year_start: '2023', battery_capacity: '3.4 kWh', battery_type: 'Lithium-ion NMC', battery_useable_capacity: '3.4 kWh', charge_power: '650 W AC', charge_power_max: '650 W AC', charge_speed: '70 km/h', acceleration_0_100_kmh: 'N/A', top_speed: '82 km/h', electric_range: '145 km', total_power: '4.4 kW (6 PS)', total_torque: '33 Nm', drive: 'Rear', vehicle_consumption: '23.4 Wh/km', co2_emissions: '0 g/km', length: '1830 mm', width: '650 mm', height: '1170 mm', seats: '2 people', cargo_volume: '32 L', car_body: 'Scooter', segment: 'Two-wheeler' },
   { make: 'Bajaj', model: 'Chetak', year_start: '2023', battery_capacity: '3 kWh', battery_type: 'Lithium-ion NMC', battery_useable_capacity: '3 kWh', charge_power: '750 W AC', charge_power_max: '750 W AC', charge_speed: '75 km/h', acceleration_0_100_kmh: 'N/A', top_speed: '73 km/h', electric_range: '126 km', total_power: '4 kW (5.4 PS)', total_torque: '16 Nm', drive: 'Rear', vehicle_consumption: '23.8 Wh/km', co2_emissions: '0 g/km', length: '1900 mm', width: '735 mm', height: '1155 mm', seats: '2 people', cargo_volume: '20 L', car_body: 'Scooter', segment: 'Two-wheeler' },
 ];
+
+const LOCAL_EV_CONTEXT = INDIAN_EV_DATABASE.map((vehicle) => (
+  `${vehicle.make} ${vehicle.model}: ${vehicle.electric_range} range, ` +
+  `${vehicle.battery_capacity} battery, ${vehicle.charge_power_max} maximum charging, ` +
+  `${vehicle.car_body}, ${vehicle.seats}`
+)).join('\n');
+
+function sanitizeChatHistory(history) {
+  if (!Array.isArray(history)) return [];
+
+  return history
+    .slice(-8)
+    .filter((item) => item && ['user', 'assistant'].includes(item.role))
+    .map((item) => ({
+      role: item.role,
+      content: String(item.content || '').trim().slice(0, 1000),
+    }))
+    .filter((item) => item.content);
+}
+
+async function askMistral(message, history) {
+  if (!MISTRAL_API_KEY) {
+    throw new Error('MISTRAL_API_KEY is not configured');
+  }
+
+  const response = await axios.post(
+    MISTRAL_CHAT_URL,
+    {
+      model: MISTRAL_CHAT_MODEL,
+      temperature: 0.2,
+      max_tokens: 700,
+      messages: [
+        {
+          role: 'system',
+          content: `You are EVA, a practical AI assistant for Indian EV customers.
+Reply in the same language as the user, including natural Hinglish. Answer the actual question directly; never repeat a fixed support menu.
+Use the local vehicle data below for model names and specifications. Do not invent current prices, subsidies, availability, or specifications. If exact live data is unavailable, clearly say it should be verified.
+Keep normal answers concise and use short bullets where useful.
+
+LOCAL EV DATA:
+${LOCAL_EV_CONTEXT}`,
+        },
+        ...sanitizeChatHistory(history),
+        { role: 'user', content: String(message).trim().slice(0, 500) },
+      ],
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${MISTRAL_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 25000,
+    },
+  );
+
+  const content = response.data?.choices?.[0]?.message?.content;
+  const answer = typeof content === 'string'
+    ? content.trim()
+    : Array.isArray(content)
+      ? content.map((item) => item?.text || '').join('').trim()
+      : '';
+
+  if (!answer) throw new Error('Mistral returned an empty answer');
+  return answer;
+}
+
+function getMentionedVehicles(message) {
+  const normalized = String(message).toLowerCase();
+
+  return INDIAN_EV_DATABASE.filter((vehicle) => {
+    const fullName = `${vehicle.make} ${vehicle.model}`.toLowerCase();
+    const modelName = vehicle.model.toLowerCase();
+    const shortModelName = modelName
+      .replace(/\belectric\b/g, '')
+      .replace(/\bev\b/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return normalized.includes(fullName)
+      || normalized.includes(modelName)
+      || (shortModelName.length >= 4 && normalized.includes(shortModelName));
+  });
+}
+
+function formatLocalEVList() {
+  const grouped = INDIAN_EV_DATABASE.reduce((brands, vehicle) => {
+    if (!brands[vehicle.make]) brands[vehicle.make] = [];
+    brands[vehicle.make].push(vehicle.model);
+    return brands;
+  }, {});
+
+  return [
+    '**Available EV models in our local database:**',
+    '',
+    ...Object.entries(grouped).map(
+      ([make, models]) => `- **${make}:** ${models.join(', ')}`,
+    ),
+    '',
+    'Kisi bhi 2 models ka naam bhejiye, main range, battery aur charging compare kar dunga.',
+  ].join('\n');
+}
+
+function getLocalEVAnswer(message) {
+  const normalized = String(message).toLowerCase().trim();
+  const mentionedVehicles = getMentionedVehicles(normalized);
+  const wantsList = /(list|names?|models?|options?|naam|gaadi|cars?|vehicles?)/i.test(normalized)
+    && /(ev|electric|car|vehicle|gaadi|model)/i.test(normalized);
+
+  if (wantsList) return formatLocalEVList();
+
+  if (mentionedVehicles.length >= 2 && /(compare|versus|\bvs\b|difference|better)/i.test(normalized)) {
+    return [
+      '**EV comparison:**',
+      '',
+      ...mentionedVehicles.slice(0, 3).map((vehicle) => (
+        `- **${vehicle.make} ${vehicle.model}:** ${vehicle.electric_range} range, ` +
+        `${vehicle.battery_capacity} battery, ${vehicle.charge_power_max} max charging`
+      )),
+      '',
+      'Real-world range driving style, weather aur AC usage se change ho sakti hai.',
+    ].join('\n');
+  }
+
+  if (mentionedVehicles.length) {
+    const vehicle = mentionedVehicles[0];
+    return [
+      `**${vehicle.make} ${vehicle.model}**`,
+      '',
+      `- Range: ${vehicle.electric_range}`,
+      `- Battery: ${vehicle.battery_capacity}`,
+      `- Maximum charging: ${vehicle.charge_power_max}`,
+      `- Power: ${vehicle.total_power}`,
+      `- Body/Seats: ${vehicle.car_body}, ${vehicle.seats}`,
+      '',
+      'Ye local product data hai; current variant, price aur availability dealer se verify karein.',
+    ].join('\n');
+  }
+
+  if (/(range|distance|kilomet|km)/i.test(normalized)) {
+    const longestRange = [...INDIAN_EV_DATABASE]
+      .sort((first, second) => parseInt(second.electric_range, 10) - parseInt(first.electric_range, 10))
+      .slice(0, 5);
+
+    return [
+      '**Longest-range EVs in our local database:**',
+      '',
+      ...longestRange.map(
+        (vehicle) => `- **${vehicle.make} ${vehicle.model}:** ${vehicle.electric_range}`,
+      ),
+      '',
+      'Real-world range weather, speed, traffic aur AC usage par depend karti hai.',
+    ].join('\n');
+  }
+
+  if (/(charg|battery|home charger)/i.test(normalized)) {
+    return 'EV charging mainly 3 types ki hoti hai: slow AC home charging, faster AC charging aur DC fast charging. Apna EV model batayein, main uski battery, supported charging power aur approximate charging guidance bata dunga.';
+  }
+
+  if (/(test ride|test drive|book)/i.test(normalized)) {
+    return 'Test drive book karne ke liye preferred EV model, city, date aur convenient time share kijiye. Team confirmation ke liye aapka naam aur phone number bhi required hoga.';
+  }
+
+  if (/(price|cost|lakh|subsid)/i.test(normalized)) {
+    return 'EV prices aur subsidies frequently change hoti hain. Model aur city batayein; main available vehicle details explain karunga, lekin final on-road price authorised dealer se verify karna hoga.';
+  }
+
+  if (/^(hi|hello|hey|namaste|hii+)(\s|!|\.|$)/i.test(normalized)) {
+    return 'Namaste! 👋 Aap kisi EV ka naam, range, battery, charging ya comparison pooch sakte hain. Example: “Nexon EV aur Curvv EV compare karo.”';
+  }
+
+  return `Main aapke question “${String(message).trim().slice(0, 120)}” ko clearly samajh nahi paaya. EV model ka naam ya required detail—range, battery, charging, comparison, price ya test drive—thoda clearly likhiye.`;
+}
 
 function searchIndianEVs(make, model) {
   return INDIAN_EV_DATABASE.filter(v => {
@@ -466,12 +649,20 @@ app.get('/api/analytics/dashboard', authMiddleware, async (req, res) => {
 });
 
 // ============================================================
-// CHAT ROUTE (chatbot fallback logic)
+// CHAT ROUTE (Mistral AI with grounded local fallback)
 // ============================================================
 app.post('/api/chat', async (req, res) => {
   try {
-    const { message, sessionId, visitorName, visitorEmail } = req.body;
-    if (!message) return res.status(400).json({ success: false, message: 'Message required' });
+    const { message, history, sessionId, visitorName, visitorEmail } = req.body;
+    const question = String(message || '').trim();
+
+    if (!question) {
+      return res.status(400).json({ success: false, message: 'Message required' });
+    }
+
+    if (question.length > 500) {
+      return res.status(400).json({ success: false, message: 'Message is too long' });
+    }
 
     if (visitorEmail) {
       await Lead.findOneAndUpdate(
@@ -481,24 +672,24 @@ app.post('/api/chat', async (req, res) => {
       );
     }
 
-    const msg = message.toLowerCase();
-    let response = '';
+    let response;
+    let mode = 'local';
 
-    if (msg.includes('test ride') || msg.includes('test drive')) {
-      response = '🚗 Great! I can book a test ride for you. We have Nexon EV, Tiago EV, Punch EV & Tigor EV available. Please share your preferred date and city!';
-    } else if (msg.includes('price') || msg.includes('cost') || msg.includes('lakh')) {
-      response = '💰 Tata EV range starts at ₹8.49L (Tiago EV) to ₹25L+ (Nexon EV Max). All models qualify for FAME-II subsidy up to ₹1.5L! Want a detailed quote?';
-    } else if (msg.includes('charg') || msg.includes('battery') || msg.includes('range')) {
-      response = '🔋 Nexon EV Max: 437km range, charges 0-100% in 8.5hrs AC or 60min DC fast charge. Tiago EV: 315km range. Want info on home charger installation?';
-    } else if (msg.includes('service') || msg.includes('repair')) {
-      response = '🔧 Our EV service centers are available across India with certified EV technicians. Would you like to book a service appointment?';
-    } else if (msg.includes('hi') || msg.includes('hello') || msg.includes('hey')) {
-      response = '👋 Hello! Welcome to TataEV. I can help you with test rides, EV pricing, charging info, and service. What would you like to know?';
-    } else {
-      response = '⚡ Thanks for reaching out! I can help with test rides, EV pricing, charging support, and service bookings. What would you like to know?';
+    try {
+      response = await askMistral(question, history);
+      mode = 'mistral';
+    } catch (aiError) {
+      const providerStatus = aiError.response?.status || aiError.code || aiError.message;
+      console.warn(`Mistral unavailable; using local EV knowledge: ${providerStatus}`);
+      response = getLocalEVAnswer(question);
     }
 
-    res.json({ success: true, response, sessionId: sessionId || `s_${Date.now()}` });
+    res.json({
+      success: true,
+      response,
+      mode,
+      sessionId: sessionId || `s_${Date.now()}`,
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -583,6 +774,10 @@ app.get('/api/health', (req, res) => {
     success: true,
     message: '✅ TataEV API running',
     database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
+    assistant: {
+      mode: MISTRAL_API_KEY ? 'mistral' : 'local',
+      mistralConfigured: Boolean(MISTRAL_API_KEY),
+    },
     timestamp: new Date(),
   });
 });

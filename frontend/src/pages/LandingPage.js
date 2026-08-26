@@ -575,38 +575,70 @@ function VoiceAgentSection() {
 }
 
 // ============================================================
-// COST CALCULATOR — Scale + Fade
+// EV LOAN EMI CALCULATOR — Scale + Fade
 // ============================================================
 function CostCalculator() {
-  const [form, setForm] = useState({ workers: 10, salary: 25000, extra: 50000, hours: 8, aiCost: 14999, multiplier: 3 });
-  const [result, setResult] = useState(null);
-  const [showHinglish, setShowHinglish] = useState(false);
-  const set = k => e => setForm(p => ({ ...p, [k]: Number(e.target.value) }));
-  const fmt = n => n.toLocaleString('en-IN');
+  const defaults = { vehiclePrice: 1499000, downPayment: 299800, interestRate: 9.25, tenureYears: 5 };
 
-  const calc = () => {
-    const humanCost = (form.workers * form.salary) + form.extra;
-    const humanHours = form.workers * form.hours * 26;
-    const aiAgents = Math.ceil(form.workers / form.multiplier);
-    const aiCost = aiAgents * form.aiCost;
-    const aiHours = form.workers * 24 * 30;
-    const saved = humanCost - aiCost;
-    const pct = ((saved / humanCost) * 100).toFixed(1);
-    const outPct = (((aiHours - humanHours) / humanHours) * 100).toFixed(0);
-    setResult({ humanCost, humanHours, aiAgents, aiCost, aiHours, saved, pct, outPct });
+  const calculateEmi = (values) => {
+    const vehiclePrice = Math.max(Number(values.vehiclePrice) || 0, 0);
+    const downPayment = Math.min(Math.max(Number(values.downPayment) || 0, 0), vehiclePrice);
+    const annualRate = Math.max(Number(values.interestRate) || 0, 0);
+    const months = Math.max(Math.round((Number(values.tenureYears) || 1) * 12), 1);
+    const loanAmount = Math.max(vehiclePrice - downPayment, 0);
+    const monthlyRate = annualRate / 1200;
+    const growth = Math.pow(1 + monthlyRate, months);
+    const monthlyEmi = loanAmount === 0
+      ? 0
+      : monthlyRate === 0
+        ? loanAmount / months
+        : (loanAmount * monthlyRate * growth) / (growth - 1);
+    const totalLoanPayment = monthlyEmi * months;
+    const totalInterest = Math.max(totalLoanPayment - loanAmount, 0);
+
+    return {
+      vehiclePrice,
+      downPayment,
+      downPaymentPercent: vehiclePrice ? (downPayment / vehiclePrice) * 100 : 0,
+      loanAmount,
+      annualRate,
+      months,
+      monthlyEmi,
+      totalInterest,
+      totalLoanPayment,
+      totalOutflow: downPayment + totalLoanPayment,
+      suggestedIncome: monthlyEmi / 0.4,
+    };
   };
 
-  const inp = (label, k, pre, suf) => (
-    <div style={{ marginBottom: 14 }}>
-      <label style={{ display: 'block', fontSize: 11, color: '#9CA3AF', marginBottom: 5 }}>{label}</label>
+  const [form, setForm] = useState(defaults);
+  const [result, setResult] = useState(() => calculateEmi(defaults));
+  const [calculationKey, setCalculationKey] = useState(0);
+  const set = key => event => setForm(previous => ({ ...previous, [key]: event.target.value }));
+  const fmt = value => Math.round(Number(value) || 0).toLocaleString('en-IN');
+
+  const calculate = () => {
+    setResult(calculateEmi(form));
+    setCalculationKey(key => key + 1);
+  };
+
+  const setDownPaymentPercent = (percent) => {
+    const vehiclePrice = Math.max(Number(form.vehiclePrice) || 0, 0);
+    setForm(previous => ({ ...previous, downPayment: Math.round(vehiclePrice * percent / 100) }));
+  };
+
+  const inputStyle = {
+    width: '100%', background: '#080C14', border: '1px solid #24324D', borderRadius: 10,
+    padding: '12px 42px 12px 34px', color: 'white', fontSize: 14, outline: 'none', boxSizing: 'border-box',
+  };
+
+  const numberInput = (label, key, prefix, suffix, step = 1) => (
+    <div style={{ marginBottom: 17 }}>
+      <label htmlFor={`emi-${key}`} style={{ display: 'block', fontSize: 12, color: '#CBD5E1', marginBottom: 7, fontWeight: 600 }}>{label}</label>
       <div style={{ position: 'relative' }}>
-        {pre && <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#FF8C40', fontSize: 13, fontWeight: 700 }}>{pre}</span>}
-        <input type="number" value={form[k]} onChange={set(k)} min={0} style={{
-          width: '100%', background: '#080C14', border: '1px solid #1A2540', borderRadius: 8,
-          padding: pre ? '10px 10px 10px 26px' : '10px', color: 'white', fontSize: 13,
-          outline: 'none', boxSizing: 'border-box',
-        }} />
-        {suf && <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: '#6B7280', fontSize: 10 }}>{suf}</span>}
+        {prefix && <span style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: '#00D4FF', fontSize: 14, fontWeight: 800 }}>{prefix}</span>}
+        <input id={`emi-${key}`} type="number" value={form[key]} onChange={set(key)} min={0} step={step} style={inputStyle} />
+        {suffix && <span style={{ position: 'absolute', right: 13, top: '50%', transform: 'translateY(-50%)', color: '#7C8AA5', fontSize: 11 }}>{suffix}</span>}
       </div>
     </div>
   );
@@ -618,187 +650,82 @@ function CostCalculator() {
         <AnimatedSection style={{ textAlign: 'center', marginBottom: 48 }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'rgba(0,102,255,0.1)', border: '1px solid rgba(0,102,255,0.25)', borderRadius: 20, padding: '5px 14px', marginBottom: 14 }}>
             <span>🧮</span>
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#60A5FA', letterSpacing: '0.1em', textTransform: 'uppercase' }}>ROI Calculator</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#60A5FA', letterSpacing: '0.1em', textTransform: 'uppercase' }}>EV EMI Calculator</span>
           </div>
           <h2 style={{ fontSize: 'clamp(28px,4vw,44px)', fontWeight: 800, color: 'white', marginBottom: 12 }}>
-            Human Workers vs{' '}
-            <span style={{ background: 'linear-gradient(135deg,#0066FF,#00D4FF)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>AI Agents</span>
-            {' '}— Cost Calculator
+            Plan your EV with a{' '}
+            <span style={{ background: 'linear-gradient(135deg,#0066FF,#00D4FF)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>clear monthly EMI</span>
           </h2>
-          <p style={{ fontSize: 15, color: '#9CA3AF' }}>Enter your numbers and see exactly how much AI saves you.</p>
+          <p style={{ fontSize: 15, color: '#9CA3AF' }}>Enter your dealer quotation and loan details to get an instant, transparent estimate.</p>
         </AnimatedSection>
 
-        {/* Two panels — slide from sides */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 24 }}>
-          <AnimatedSection variants={fadeLeft} style={{ background: '#0D1422', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 16, padding: 24 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 22, alignItems: 'stretch' }}>
+          <AnimatedSection variants={fadeLeft} style={{ background: '#0D1422', border: '1px solid rgba(0,212,255,0.2)', borderRadius: 18, padding: 'clamp(20px,3vw,30px)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-              <span style={{ fontSize: 22 }}>👥</span>
-              <div><div style={{ fontWeight: 700, color: 'white', fontSize: 14 }}>Human Team</div><div style={{ fontSize: 10, color: '#6B7280' }}>Current monthly costs</div></div>
+              <span style={{ fontSize: 24 }}>🚙</span>
+              <div><div style={{ fontWeight: 700, color: 'white', fontSize: 15 }}>Loan details</div><div style={{ fontSize: 11, color: '#7C8AA5' }}>Use the latest on-road quotation from your dealer</div></div>
             </div>
-            {inp('Number of Workers', 'workers')}
-            {inp('Monthly Salary / Worker', 'salary', '₹')}
-            {inp('Additional Costs (office, training etc)', 'extra', '₹')}
-            {inp('Working Hours / Day', 'hours', null, 'hrs')}
+            {numberInput('EV on-road price', 'vehiclePrice', '₹', null, 1000)}
+            {numberInput('Down payment', 'downPayment', '₹', null, 1000)}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '-7px 0 18px' }}>
+              {[10, 20, 30].map(percent => (
+                <button key={percent} type="button" onClick={() => setDownPaymentPercent(percent)} style={{
+                  background: 'rgba(0,102,255,0.1)', border: '1px solid rgba(96,165,250,0.25)', color: '#93C5FD',
+                  padding: '6px 12px', borderRadius: 999, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                }}>{percent}% down</button>
+              ))}
+            </div>
+            {numberInput('Annual interest rate', 'interestRate', null, '% p.a.', 0.05)}
+            <div style={{ marginBottom: 20 }}>
+              <label htmlFor="emi-tenure" style={{ display: 'block', fontSize: 12, color: '#CBD5E1', marginBottom: 7, fontWeight: 600 }}>Loan tenure</label>
+              <select id="emi-tenure" value={form.tenureYears} onChange={set('tenureYears')} style={{ ...inputStyle, paddingLeft: 13, cursor: 'pointer' }}>
+                {[1, 2, 3, 4, 5, 6, 7].map(year => <option key={year} value={year}>{year} year{year > 1 ? 's' : ''} ({year * 12} months)</option>)}
+              </select>
+            </div>
+            <motion.button
+              type="button" onClick={calculate}
+              whileHover={{ scale: 1.02, boxShadow: '0 0 38px rgba(0,102,255,0.5)' }} whileTap={{ scale: 0.98 }}
+              style={{ width: '100%', background: 'linear-gradient(135deg,#0066FF,#0044CC)', color: 'white', border: 'none', borderRadius: 11, padding: '14px 20px', fontSize: 15, fontWeight: 800, cursor: 'pointer', boxShadow: '0 0 24px rgba(0,102,255,0.3)' }}
+            >Calculate my EMI</motion.button>
           </AnimatedSection>
 
-          <AnimatedSection variants={fadeRight} style={{ background: '#0D1422', border: '1px solid rgba(0,102,255,0.2)', borderRadius: 16, padding: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-              <span style={{ fontSize: 22 }}>🤖</span>
-              <div><div style={{ fontWeight: 700, color: 'white', fontSize: 14 }}>AI Agent Setup</div><div style={{ fontSize: 10, color: '#6B7280' }}>TataEV AI platform costs</div></div>
-            </div>
-            {inp('AI Agent Monthly Cost / agent', 'aiCost', '₹')}
-            {inp('Efficiency (1 AI = ? workers)', 'multiplier', null, 'workers')}
-            <div style={{ background: '#080C14', border: '1px solid rgba(0,102,255,0.15)', borderRadius: 10, padding: 14, marginTop: 8 }}>
-              <div style={{ fontSize: 10, color: '#6B7280', marginBottom: 10 }}>LIVE PREVIEW</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <AnimatedSection variants={fadeRight} style={{ background: 'linear-gradient(145deg,#0E1829,#0A101C)', border: '1px solid rgba(0,102,255,0.28)', borderRadius: 18, padding: 'clamp(20px,3vw,30px)', boxShadow: '0 24px 70px rgba(0,0,0,0.28)' }}>
+            <motion.div key={calculationKey} initial={{ opacity: 0.55, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
+              <div style={{ color: '#7C8AA5', fontSize: 11, fontWeight: 800, letterSpacing: '0.12em', marginBottom: 8 }}>ESTIMATED MONTHLY EMI</div>
+              <div style={{ fontSize: 'clamp(34px,5vw,54px)', fontWeight: 900, color: 'white', lineHeight: 1.1 }}>₹{fmt(result.monthlyEmi)}</div>
+              <div style={{ color: '#8EA0BE', fontSize: 12, marginTop: 8 }}>for {result.months} months at {result.annualRate}% p.a.</div>
+
+              <div style={{ height: 10, display: 'flex', borderRadius: 999, overflow: 'hidden', background: '#1A2540', margin: '26px 0 10px' }}>
+                <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min(result.downPaymentPercent, 100)}%` }} transition={{ duration: 0.7 }} style={{ background: '#00D4FF' }} />
+                <motion.div initial={{ width: 0 }} animate={{ width: `${Math.max(100 - result.downPaymentPercent, 0)}%` }} transition={{ duration: 0.7 }} style={{ background: '#0066FF' }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#7C8AA5', fontSize: 10, marginBottom: 24 }}>
+                <span><b style={{ color: '#00D4FF' }}>●</b> Down payment {result.downPaymentPercent.toFixed(0)}%</span>
+                <span><b style={{ color: '#0066FF' }}>●</b> Financed {(100 - result.downPaymentPercent).toFixed(0)}%</span>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 10 }}>
                 {[
-                  ['AI Agents Needed', Math.ceil(form.workers / form.multiplier)],
-                  ['Total AI Cost', `₹${fmt(Math.ceil(form.workers/form.multiplier)*form.aiCost)}`],
-                  ['Availability', '24/7/365'],
-                  ['Response Time', '< 2 sec'],
-                ].map(([l, v]) => (
-                  <div key={l} style={{ background: '#0D1422', borderRadius: 8, padding: '8px 10px' }}>
-                    <div style={{ fontSize: 9, color: '#6B7280', marginBottom: 2 }}>{l}</div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: '#60A5FA' }}>{v}</div>
+                  ['Loan amount', `₹${fmt(result.loanAmount)}`],
+                  ['Total interest', `₹${fmt(result.totalInterest)}`],
+                  ['Loan repayment', `₹${fmt(result.totalLoanPayment)}`],
+                  ['Total outflow', `₹${fmt(result.totalOutflow)}`],
+                ].map(([label, value]) => (
+                  <div key={label} style={{ background: 'rgba(5,8,16,0.62)', border: '1px solid #1A2943', borderRadius: 11, padding: '13px 14px' }}>
+                    <div style={{ color: '#75839C', fontSize: 10, marginBottom: 5 }}>{label}</div>
+                    <div style={{ color: 'white', fontSize: 15, fontWeight: 800 }}>{value}</div>
                   </div>
                 ))}
               </div>
-            </div>
+
+              <div style={{ marginTop: 18, background: 'rgba(0,255,136,0.06)', border: '1px solid rgba(0,255,136,0.17)', borderRadius: 11, padding: 14 }}>
+                <div style={{ color: '#00E38C', fontSize: 12, fontWeight: 800, marginBottom: 4 }}>Comfortable income guideline</div>
+                <div style={{ color: '#B8C6DA', fontSize: 12, lineHeight: 1.6 }}>A monthly income near <strong style={{ color: 'white' }}>₹{fmt(result.suggestedIncome)}+</strong> keeps this EMI around 40% of income.</div>
+              </div>
+              <p style={{ color: '#5F6D84', fontSize: 10, lineHeight: 1.6, margin: '16px 0 0' }}>Indicative estimate only. Final EMI, fees and eligibility depend on the lender, credit profile and dealer quotation.</p>
+            </motion.div>
           </AnimatedSection>
         </div>
-
-        <AnimatedSection style={{ textAlign: 'center', marginBottom: 36 }}>
-          <motion.button
-            onClick={calc}
-            whileHover={{ scale: 1.04, boxShadow: '0 0 44px rgba(0,102,255,0.6)' }}
-            whileTap={{ scale: 0.97 }}
-            style={{
-              background: 'linear-gradient(135deg,#0066FF,#0044CC)', color: 'white', border: 'none',
-              borderRadius: 12, padding: '14px 48px', fontSize: 16, fontWeight: 700, cursor: 'pointer',
-              boxShadow: '0 0 30px rgba(0,102,255,0.4)',
-            }}
-          >
-            🧮 Calculate Savings Now
-          </motion.button>
-        </AnimatedSection>
-
-        <AnimatePresence>
-          {result && (
-            <motion.div
-              key="results"
-              initial={{ opacity: 0, y: 24 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.5 }}
-            >
-              {/* Banner */}
-              <div style={{
-                background: result.saved > 0 ? 'rgba(0,255,136,0.06)' : 'rgba(239,68,68,0.06)',
-                border: `1px solid ${result.saved > 0 ? 'rgba(0,255,136,0.3)' : 'rgba(239,68,68,0.3)'}`,
-                borderRadius: 16, padding: '22px 24px', marginBottom: 20,
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16,
-              }}>
-                <div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: 'white', marginBottom: 6 }}>
-                    {result.saved > 0 ? `🎉 AI saves ₹${fmt(result.saved)}/month!` : '⚠️ Review your numbers'}
-                  </div>
-                  <div style={{ fontSize: 13, color: '#9CA3AF' }}>
-                    {result.saved > 0 ? `₹${fmt(result.saved * 12)} saved annually — ${result.pct}% cost reduction` : 'Try increasing efficiency multiplier or reducing AI cost'}
-                  </div>
-                </div>
-                <div style={{ background: result.saved > 0 ? 'rgba(0,255,136,0.15)' : 'rgba(239,68,68,0.15)', borderRadius: 12, padding: '12px 20px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 32, fontWeight: 900, color: result.saved > 0 ? '#00FF88' : '#F87171' }}>
-                    {result.saved > 0 ? `-${result.pct}%` : `+${Math.abs(result.pct)}%`}
-                  </div>
-                  <div style={{ fontSize: 10, color: '#9CA3AF' }}>Cost Change</div>
-                </div>
-              </div>
-
-              {/* KPIs */}
-              <StaggerSection style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 20 }}>
-                {[
-                  { label: 'Human Monthly Cost', val: `₹${fmt(result.humanCost)}`, sub: `${form.workers} workers`, color: '#F87171' },
-                  { label: 'AI Monthly Cost', val: `₹${fmt(result.aiCost)}`, sub: `${result.aiAgents} agents`, color: '#60A5FA' },
-                  { label: 'Monthly Savings', val: `₹${fmt(Math.abs(result.saved))}`, sub: result.saved > 0 ? 'with AI' : 'humans cheaper', color: '#00FF88' },
-                  { label: 'Output Increase', val: `+${result.outPct}%`, sub: 'AI works 24/7', color: '#FFB347' },
-                ].map(({ label, val, sub, color }) => (
-                  <motion.div key={label} variants={staggerItem} style={{ background: '#0D1422', border: `1px solid ${color}25`, borderRadius: 14, padding: 18, textAlign: 'center' }}>
-                    <div style={{ fontSize: 22, fontWeight: 800, color, marginBottom: 5 }}>{val}</div>
-                    <div style={{ fontSize: 12, color: '#9CA3AF' }}>{label}</div>
-                    <div style={{ fontSize: 10, color: '#6B7280', marginTop: 3 }}>{sub}</div>
-                  </motion.div>
-                ))}
-              </StaggerSection>
-
-              {/* Visual bars */}
-              <div style={{ background: '#0D1422', border: '1px solid #1A2540', borderRadius: 14, padding: 22, marginBottom: 20 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: 'white', marginBottom: 18 }}>📊 Visual Comparison</div>
-                {[
-                  { label: 'Human Team Cost', val: result.humanCost, color: '#F87171' },
-                  { label: 'AI Agent Cost', val: result.aiCost, color: '#60A5FA' },
-                  ...(result.saved > 0 ? [{ label: 'Monthly Savings', val: result.saved, color: '#00FF88' }] : []),
-                ].map(({ label, val, color }) => {
-                  const pct = Math.min((val / result.humanCost) * 100, 100);
-                  return (
-                    <div key={label} style={{ marginBottom: 14 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
-                        <span style={{ color: '#9CA3AF' }}>{label}</span>
-                        <span style={{ color: 'white', fontWeight: 700 }}>₹{fmt(val)}</span>
-                      </div>
-                      <div style={{ height: 8, background: '#1A2540', borderRadius: 4, overflow: 'hidden' }}>
-                        <motion.div
-                          initial={{ width: 0 }}
-                          animate={{ width: `${pct}%` }}
-                          transition={{ duration: 1, ease: 'easeOut', delay: 0.2 }}
-                          style={{ height: '100%', background: color, borderRadius: 4 }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Hinglish */}
-              <div style={{ background: 'rgba(255,107,0,0.05)', border: '1px solid rgba(255,107,0,0.15)', borderRadius: 14, overflow: 'hidden' }}>
-                <button onClick={() => setShowHinglish(!showHinglish)} style={{
-                  width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '14px 18px', background: 'none', border: 'none', cursor: 'pointer',
-                }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: '#FF8C40' }}>🇮🇳 Hinglish mein samjho — AI kyun better hai? {showHinglish ? '▲' : '▼'}</span>
-                </button>
-                <AnimatePresence>
-                  {showHinglish && (
-                    <motion.div
-                      key="hinglish"
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.35 }}
-                      style={{ overflow: 'hidden' }}
-                    >
-                      <div style={{ padding: '0 18px 18px' }}>
-                        <div style={{ background: '#080C14', borderRadius: 10, padding: 18, fontSize: 13, color: '#D1D5DB', lineHeight: 2 }}>
-                          <p><strong style={{ color: '#FF8C40' }}>Bhai, ekdum simple baat:</strong></p>
-                          <p>Ek human worker din mein sirf <strong style={{ color: '#F87171' }}>{form.hours} ghante</strong> kaam karta hai — baaki time chai, lunch, meetings aur Sunday off! 😅</p>
-                          <p><strong style={{ color: '#60A5FA' }}>AI Agent?</strong> Woh <strong style={{ color: '#00FF88' }}>24 ghante, 7 din, 365 din</strong> kaam karta hai. Bimaar nahi padta, salary hike nahi maangta! 🤖</p>
-                          <p>Tumhare <strong>{form.workers} workers</strong> ka kharcha: <strong style={{ color: '#F87171' }}>₹{fmt(result.humanCost)}/month</strong></p>
-                          <p>Sirf <strong style={{ color: '#60A5FA' }}>{result.aiAgents} AI agents</strong> se same kaam: <strong style={{ color: '#60A5FA' }}>₹{fmt(result.aiCost)}/month</strong></p>
-                          {result.saved > 0 && <p><strong style={{ color: '#00FF88' }}>Bachenge: ₹{fmt(result.saved)}/month = ₹{fmt(result.saved * 12)}/saal! 🎉</strong></p>}
-                          <ul style={{ paddingLeft: 16 }}>
-                            <li>✅ Raat 2 baje bhi customer ka call attend hoga</li>
-                            <li>✅ Ek saath 100+ customers se baat</li>
-                            <li>✅ Test ride booking automatic</li>
-                            <li>✅ Koi bhi lead miss nahi hogi</li>
-                          </ul>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
     </section>
   );

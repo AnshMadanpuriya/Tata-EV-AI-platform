@@ -1,6 +1,12 @@
 const mongoose = require('mongoose');
 
 const bookingSchema = new mongoose.Schema({
+  bookingCode: {
+    type: String,
+    unique: true,
+    index: true,
+    default: () => `TEV-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+  },
   name: { type: String, required: true },
   email: { type: String, required: true },
   phone: { type: String, required: true },
@@ -9,10 +15,29 @@ const bookingSchema = new mongoose.Schema({
   date: { type: Date, required: true },
   timeSlot: { type: String, required: true },
   location: { type: String, default: '' },
-  status: { type: String, enum: ['pending', 'confirmed', 'completed', 'cancelled'], default: 'pending' },
+  status: { type: String, enum: ['pending', 'confirmed', 'completed', 'cancelled', 'no-show'], default: 'pending' },
   notes: { type: String, default: '' },
   sessionId: { type: String },
-  reminderSent: { type: Boolean, default: false }
+  leadId: { type: mongoose.Schema.Types.ObjectId, ref: 'Lead' },
+  idempotencyKey: { type: String, sparse: true, unique: true },
+  cancellationReason: { type: String, default: '' },
+  reminderSent: { type: Boolean, default: false },
+  automation: {
+    status: { type: String, enum: ['not-configured', 'queued', 'delivered', 'failed'], default: 'not-configured' },
+    lastEvent: { type: String, default: '' },
+    lastAttemptAt: { type: Date },
+    error: { type: String, default: '' }
+  },
+  rescheduleHistory: [{
+    fromDate: Date,
+    fromTimeSlot: String,
+    toDate: Date,
+    toTimeSlot: String,
+    changedAt: { type: Date, default: Date.now },
+    changedBy: { type: String, default: 'admin' }
+  }]
 }, { timestamps: true });
+
+bookingSchema.index({ date: 1, timeSlot: 1, location: 1, status: 1 });
 
 module.exports = mongoose.model('Booking', bookingSchema);

@@ -1,7 +1,7 @@
 import React, { useState, useRef, memo } from 'react';
 import { motion, AnimatePresence, useInView } from 'framer-motion';
 
-const API_URL = 'http://localhost:5000/api';
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
 const POPULAR_MAKES = [
   { name: 'Tata', emoji: '🇮🇳', color: '#0066FF' },

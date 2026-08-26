@@ -1,63 +1,58 @@
-import React, { useState, useEffect } from 'react';
-import { Users, Calendar, MessageSquare, TrendingUp, ArrowUp, ArrowDown, Zap } from 'lucide-react';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  AlertTriangle, Calendar, CheckCircle2, Clock3, Flame, RefreshCw,
+  TrendingUp, UserCheck, Users
+} from 'lucide-react';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import API from '../../utils/api';
 
-const COLORS = ['#0066FF', '#00D4FF', '#00FF88', '#FF6B00', '#A78BFA'];
-
-// Demo data fallback
-const demoStats = {
-  totalLeads: 342, newLeads: 47, convertedLeads: 89, conversionRate: 26.0,
-  totalBookings: 128, pendingBookings: 34, totalChats: 1204, recentChats: 156,
-  leadsByStatus: [
-    { _id: 'new', count: 120 }, { _id: 'contacted', count: 98 }, { _id: 'qualified', count: 75 },
-    { _id: 'converted', count: 89 }, { _id: 'lost', count: 40 }
-  ],
-  leadsBySource: [
-    { _id: 'chatbot', count: 180 }, { _id: 'voice', count: 95 }, { _id: 'form', count: 42 }, { _id: 'demo-booking', count: 25 }
-  ],
-  dailyLeads: [
-    { _id: '2025-07-14', count: 8 }, { _id: '2025-07-15', count: 12 }, { _id: '2025-07-16', count: 6 },
-    { _id: '2025-07-17', count: 15 }, { _id: '2025-07-18', count: 9 }, { _id: '2025-07-19', count: 11 }, { _id: '2025-07-20', count: 18 }
-  ]
+const EMPTY_STATS = {
+  totalLeads: 0, newLeads: 0, conversionRate: 0, hotLeads: 0, warmLeads: 0,
+  totalBookings: 0, upcomingBookingsCount: 0, bookingCompletionRate: 0,
+  followUpsDue: 0, handoffsRequested: 0, automationFailures: 0,
+  leadsByStatus: [], attentionQueue: [], upcomingBookings: []
 };
 
-const StatCard = ({ title, value, sub, icon: Icon, color, change }) => (
-  <div className="card p-5">
-    <div className="flex items-start justify-between mb-3">
-      <div className={`w-10 h-10 rounded-lg ${color} flex items-center justify-center`}><Icon size={18} className="text-white" /></div>
-      {change !== undefined && (
-        <div className={`flex items-center gap-1 text-xs font-medium ${change >= 0 ? 'text-ev-green' : 'text-red-400'}`}>
-          {change >= 0 ? <ArrowUp size={12} /> : <ArrowDown size={12} />}{Math.abs(change)}%
-        </div>
-      )}
+const StatCard = ({ title, value, sub, icon: Icon, accent }) => (
+  <div className="card p-5 relative overflow-hidden">
+    <div className={`absolute inset-x-0 top-0 h-0.5 ${accent}`} />
+    <div className="flex items-start justify-between mb-4">
+      <div className={`w-10 h-10 rounded-xl ${accent} flex items-center justify-center`}>
+        <Icon size={18} className="text-white" />
+      </div>
     </div>
-    <div className="font-display font-bold text-3xl text-white mb-0.5">{value}</div>
-    <div className="text-sm font-medium text-white mb-0.5">{title}</div>
-    <div className="text-xs text-gray-500">{sub}</div>
+    <div className="font-display font-bold text-3xl text-white mb-1">{value}</div>
+    <div className="text-sm font-medium text-white">{title}</div>
+    <div className="text-xs text-gray-500 mt-1">{sub}</div>
   </div>
 );
 
-const CustomTooltip = ({ active, payload, label }) => {
-  if (active && payload?.length) return (
-    <div className="bg-ev-card border border-ev-border rounded-lg px-3 py-2 text-xs">
-      <div className="text-gray-400 mb-1">{label}</div>
-      {payload.map((p, i) => <div key={i} style={{ color: p.color }}>{p.name}: {p.value}</div>)}
-    </div>
-  );
-  return null;
-};
+const badge = (temperature) => ({
+  hot: 'bg-red-400/10 text-red-300 border-red-400/20',
+  warm: 'bg-yellow-400/10 text-yellow-300 border-yellow-400/20',
+  cold: 'bg-blue-400/10 text-blue-300 border-blue-400/20'
+}[temperature] || 'bg-gray-400/10 text-gray-300 border-gray-400/20');
 
 export default function Overview() {
-  const [stats, setStats] = useState(null);
+  const [stats, setStats] = useState(EMPTY_STATS);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
-    API.get('/analytics/dashboard')
-      .then(r => setStats(r.data.stats))
-      .catch(() => setStats(demoStats))
-      .finally(() => setLoading(false));
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const { data } = await API.get('/analytics/owner');
+      setStats({ ...EMPTY_STATS, ...data.stats });
+    } catch (requestError) {
+      setStats(EMPTY_STATS);
+      setError(requestError.response?.data?.message || 'Live operations data is unavailable. Check the backend and MongoDB connection.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { load(); }, [load]);
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -65,81 +60,96 @@ export default function Overview() {
     </div>
   );
 
-  const s = stats || demoStats;
+  const pipeline = (stats.leadsByStatus || []).map((item) => ({ status: item._id, leads: item.count }));
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display font-bold text-2xl text-white mb-0.5">Dashboard Overview</h1>
-        <p className="text-gray-500 text-sm">Real-time performance metrics for your AI agent.</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-xs text-ev-cyan font-mono uppercase tracking-[0.2em] mb-1">Phase 1 · Sales operations</div>
+          <h1 className="font-display font-bold text-2xl text-white">Owner Command Centre</h1>
+          <p className="text-gray-500 text-sm">Live lead priority, test-drive funnel and automation attention.</p>
+        </div>
+        <button onClick={load} className="flex items-center gap-2 text-xs px-3 py-2 border border-ev-border rounded-lg text-gray-400 hover:text-white hover:border-ev-blue/50 transition-colors">
+          <RefreshCw size={13} /> Refresh data
+        </button>
       </div>
 
-      {/* Stat cards */}
+      {error && (
+        <div className="card border-yellow-400/30 bg-yellow-400/5 p-4 flex items-start gap-3">
+          <AlertTriangle size={18} className="text-yellow-400 mt-0.5 flex-shrink-0" />
+          <div><div className="text-sm text-yellow-200 font-medium">Live data not connected</div><div className="text-xs text-yellow-100/60 mt-1">{error}</div></div>
+        </div>
+      )}
+
       <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <StatCard title="Total Leads" value={s.totalLeads} sub={`${s.newLeads} new this month`} icon={Users} color="bg-ev-blue" change={14} />
-        <StatCard title="Conversion Rate" value={`${s.conversionRate}%`} sub={`${s.convertedLeads} converted`} icon={TrendingUp} color="bg-ev-green/80" change={3.2} />
-        <StatCard title="Bookings" value={s.totalBookings} sub={`${s.pendingBookings} pending`} icon={Calendar} color="bg-purple-500" change={8} />
-        <StatCard title="AI Conversations" value={s.totalChats} sub={`${s.recentChats} this week`} icon={MessageSquare} color="bg-ev-cyan/80" change={21} />
+        <StatCard title="Active leads" value={stats.totalLeads} sub={`${stats.newLeads} captured in the last 7 days`} icon={Users} accent="bg-ev-blue" />
+        <StatCard title="Hot leads" value={stats.hotLeads} sub={`${stats.warmLeads} more warm leads`} icon={Flame} accent="bg-red-500" />
+        <StatCard title="Conversion rate" value={`${stats.conversionRate}%`} sub="Lead to converted customer" icon={TrendingUp} accent="bg-ev-green/80" />
+        <StatCard title="Upcoming drives" value={stats.upcomingBookingsCount} sub={`${stats.bookingCompletionRate}% booking completion`} icon={Calendar} accent="bg-purple-500" />
       </div>
 
-      {/* Charts row */}
-      <div className="grid lg:grid-cols-3 gap-4">
-        {/* Line chart */}
-        <div className="lg:col-span-2 card p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div className="font-display font-semibold text-white">Leads — Last 7 Days</div>
-            <div className="text-xs text-gray-500 font-mono">Daily volume</div>
-          </div>
-          <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={s.dailyLeads.map(d => ({ date: d._id?.slice(5) || d._id, leads: d.count }))}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1A2540" />
-              <XAxis dataKey="date" tick={{ fill: '#6B7280', fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: '#6B7280', fontSize: 11 }} axisLine={false} tickLine={false} />
-              <Tooltip content={<CustomTooltip />} />
-              <Line type="monotone" dataKey="leads" stroke="#0066FF" strokeWidth={2.5} dot={{ fill: '#0066FF', r: 4 }} activeDot={{ r: 6, fill: '#00D4FF' }} />
-            </LineChart>
-          </ResponsiveContainer>
+      <div className="grid md:grid-cols-3 gap-4">
+        <div className="card p-4 flex items-center gap-3">
+          <Clock3 className="text-yellow-400" size={20} />
+          <div><div className="text-xl font-bold text-white">{stats.followUpsDue}</div><div className="text-xs text-gray-500">Follow-ups due now</div></div>
+        </div>
+        <div className="card p-4 flex items-center gap-3">
+          <UserCheck className="text-ev-cyan" size={20} />
+          <div><div className="text-xl font-bold text-white">{stats.handoffsRequested}</div><div className="text-xs text-gray-500">Human handoffs waiting</div></div>
+        </div>
+        <div className="card p-4 flex items-center gap-3">
+          {stats.automationFailures ? <AlertTriangle className="text-red-400" size={20} /> : <CheckCircle2 className="text-ev-green" size={20} />}
+          <div><div className="text-xl font-bold text-white">{stats.automationFailures}</div><div className="text-xs text-gray-500">Automation failures</div></div>
+        </div>
+      </div>
+
+      <div className="grid xl:grid-cols-5 gap-4">
+        <div className="xl:col-span-3 card p-5">
+          <div className="font-display font-semibold text-white mb-1">Lead pipeline</div>
+          <div className="text-xs text-gray-500 mb-5">Only real records from MongoDB are shown.</div>
+          {pipeline.length ? (
+            <ResponsiveContainer width="100%" height={230}>
+              <BarChart data={pipeline}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1A2540" />
+                <XAxis dataKey="status" tick={{ fill: '#6B7280', fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis allowDecimals={false} tick={{ fill: '#6B7280', fontSize: 11 }} axisLine={false} tickLine={false} />
+                <Tooltip contentStyle={{ background: '#0D1422', border: '1px solid #1A2540', borderRadius: 8 }} />
+                <Bar dataKey="leads" fill="#0066FF" radius={[5, 5, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : <div className="h-[230px] flex items-center justify-center text-sm text-gray-600">No lead data yet</div>}
         </div>
 
-        {/* Pie chart */}
-        <div className="card p-5">
-          <div className="font-display font-semibold text-white mb-4">Leads by Source</div>
-          <ResponsiveContainer width="100%" height={160}>
-            <PieChart>
-              <Pie data={s.leadsBySource} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={4} dataKey="count" nameKey="_id">
-                {s.leadsBySource.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-              </Pie>
-              <Tooltip content={<CustomTooltip />} />
-            </PieChart>
-          </ResponsiveContainer>
-          <div className="space-y-2 mt-2">
-            {s.leadsBySource.map(({ _id, count }, i) => (
-              <div key={_id} className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full" style={{ background: COLORS[i % COLORS.length] }} />
-                  <span className="text-gray-400 capitalize">{_id}</span>
+        <div className="xl:col-span-2 card p-5">
+          <div className="font-display font-semibold text-white">Needs attention</div>
+          <div className="text-xs text-gray-500 mb-4">Highest-intent and escalated leads first.</div>
+          <div className="space-y-3">
+            {(stats.attentionQueue || []).length ? stats.attentionQueue.map((lead) => (
+              <div key={lead._id} className="rounded-xl border border-ev-border bg-black/10 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div><div className="text-sm text-white font-medium">{lead.name}</div><div className="text-xs text-gray-500">{lead.vehicle || 'Vehicle not selected'}</div></div>
+                  <span className={`text-[10px] uppercase tracking-wider border rounded-full px-2 py-1 ${badge(lead.temperature)}`}>{lead.temperature} · {lead.score}</span>
                 </div>
-                <span className="text-white font-medium">{count}</span>
+                <div className="text-xs text-gray-400 mt-2 line-clamp-2">{lead.nextBestAction}</div>
               </div>
-            ))}
+            )) : <div className="py-10 text-center text-sm text-gray-600">No urgent leads right now</div>}
           </div>
         </div>
       </div>
 
-      {/* Bar chart — leads by status */}
       <div className="card p-5">
-        <div className="font-display font-semibold text-white mb-4">Lead Pipeline Status</div>
-        <ResponsiveContainer width="100%" height={180}>
-          <BarChart data={s.leadsByStatus.map(d => ({ status: d._id, count: d.count }))}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1A2540" />
-            <XAxis dataKey="status" tick={{ fill: '#6B7280', fontSize: 11 }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill: '#6B7280', fontSize: 11 }} axisLine={false} tickLine={false} />
-            <Tooltip content={<CustomTooltip />} />
-            <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-              {s.leadsByStatus.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+        <div className="font-display font-semibold text-white">Next test drives</div>
+        <div className="text-xs text-gray-500 mb-4">Pending and confirmed appointments.</div>
+        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {(stats.upcomingBookings || []).length ? stats.upcomingBookings.map((booking) => (
+            <div key={booking._id} className="border border-ev-border rounded-xl p-3 bg-black/10">
+              <div className="flex justify-between gap-2"><span className="text-sm text-white font-medium">{booking.name}</span><span className="text-[10px] text-ev-cyan font-mono">{booking.bookingCode}</span></div>
+              <div className="text-xs text-gray-400 mt-1">{booking.vehicle || 'Vehicle TBD'}</div>
+              <div className="text-xs text-gray-500 mt-2">{new Date(booking.date).toLocaleDateString('en-IN')} · {booking.timeSlot}</div>
+            </div>
+          )) : <div className="text-sm text-gray-600 py-6">No upcoming bookings</div>}
+        </div>
       </div>
     </div>
   );

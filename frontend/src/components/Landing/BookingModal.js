@@ -39,8 +39,8 @@ export default function BookingModal({ onClose }) {
         {done ? (
           <div className="p-8 text-center">
             <CheckCircle size={52} className="text-ev-green mx-auto mb-4" />
-            <div className="font-display font-bold text-white text-xl mb-2">Booking Confirmed!</div>
-            <div className="text-gray-400 text-sm mb-6">We'll contact you within 2 hours to confirm your appointment.</div>
+            <div className="font-display font-bold text-white text-xl mb-2">Request Received</div>
+            <div className="text-gray-400 text-sm mb-6">Your request is saved. The dealership will contact you to confirm the appointment slot.</div>
             <button onClick={onClose} className="btn-primary px-8">Done</button>
           </div>
         ) : (

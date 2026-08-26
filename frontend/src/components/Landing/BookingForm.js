@@ -14,7 +14,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 
-const API_URL = 'http://localhost:5000/api';
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
 // ============================================================
 // VALIDATION RULES
@@ -28,8 +28,9 @@ function validateForm(form) {
   if (!form.email.trim()) errors.email = 'Email is required';
   else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = 'Enter a valid email address';
 
+  const phoneDigits = form.phone.replace(/\D/g, '').replace(/^91(?=[6-9]\d{9}$)/, '');
   if (!form.phone.trim()) errors.phone = 'Phone number is required';
-  else if (!/^[6-9]\d{9}$/.test(form.phone.replace(/\s/g, ''))) errors.phone = 'Enter a valid 10-digit Indian phone number';
+  else if (!/^[6-9]\d{9}$/.test(phoneDigits)) errors.phone = 'Enter a valid Indian phone number';
 
   if (!form.vehicle) errors.vehicle = 'Please select a vehicle model';
 
@@ -89,7 +90,7 @@ export default function BookingForm({ onClose }) {
       });
 
       if (response.data.success) {
-        setSuccess(response.data.booking);
+        setSuccess(response.data);
         setForm({ name: '', email: '', phone: '', vehicle: '', date: '', timeSlot: '', type: 'test-ride', location: '', notes: '' });
       } else {
         setSubmitError(response.data.message || 'Booking failed. Please try again.');
@@ -162,29 +163,36 @@ export default function BookingForm({ onClose }) {
               style={{ padding: '40px 24px', textAlign: 'center' }}
             >
               <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 200 }} style={{ fontSize: 56, marginBottom: 16 }}>✅</motion.div>
-              <div style={{ fontSize: 20, fontWeight: 800, color: 'white', marginBottom: 8 }}>Booking Confirmed!</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: 'white', marginBottom: 8 }}>Test-drive request received</div>
               <div style={{ fontSize: 13, color: '#9CA3AF', marginBottom: 20, lineHeight: 1.6 }}>
-                We've saved your booking and our automations are running:
+                Your request is saved. The dealership will confirm the exact slot shortly.
               </div>
 
               {/* Automation status */}
               <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: 12, padding: 16, marginBottom: 20, textAlign: 'left' }}>
                 {[
                   { icon: '💾', label: 'Saved to database', done: true },
-                  { icon: '📧', label: 'Email confirmation sent', done: true },
-                  { icon: '💬', label: 'WhatsApp confirmation sent', done: true },
-                  { icon: '🔔', label: 'Sales team notified', done: true },
+                  { icon: '🗓️', label: 'Awaiting dealership slot confirmation', done: true },
+                  {
+                    icon: '⚙️',
+                    label: success.automation?.status === 'delivered'
+                      ? 'n8n automation accepted the request'
+                      : success.automation?.status === 'failed'
+                        ? 'Automation needs staff attention'
+                        : 'Automation webhook is not configured yet',
+                    done: success.automation?.status === 'delivered',
+                  },
                 ].map(({ icon, label, done }) => (
                   <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
                     <span>{icon}</span>
                     <span style={{ flex: 1, fontSize: 12, color: '#D1D5DB' }}>{label}</span>
-                    <span style={{ color: '#00FF88', fontSize: 13 }}>✓</span>
+                    <span style={{ color: done ? '#00FF88' : '#FBBF24', fontSize: 13 }}>{done ? '✓' : '!'}</span>
                   </div>
                 ))}
               </div>
 
               <div style={{ background: 'rgba(0,102,255,0.06)', border: '1px solid rgba(0,102,255,0.15)', borderRadius: 10, padding: 12, fontSize: 12, color: '#9CA3AF', marginBottom: 20 }}>
-                Booking ID: <span style={{ color: '#00D4FF', fontFamily: 'monospace' }}>{success._id?.slice(-8) || 'N/A'}</span>
+                Booking code: <span style={{ color: '#00D4FF', fontFamily: 'monospace' }}>{success.booking?.bookingCode || success.booking?._id?.slice(-8) || 'N/A'}</span>
               </div>
 
               <button onClick={onClose} style={{

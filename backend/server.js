@@ -4,13 +4,22 @@
 // ============================================================
 
 const express = require('express');
+const crypto = require('crypto');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const bcrypt = require('bcryptjs');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
 const path = require('path');
 const dotenv = require('dotenv');
+const User = require('./models/User');
+const Lead = require('./models/Lead');
+const Booking = require('./models/Booking');
+const ChatSession = require('./models/ChatSession');
+const { qualifyLead } = require('./services/leadScoring');
+const { dispatchAutomation } = require('./services/automation');
+const { cleanText, validateLead, validateBooking, safePagination } = require('./utils/validation');
 
 // Load environment files from deterministic locations. This lets the Node
 // fallback use the same Mistral key as the Python RAG service even when the
@@ -22,58 +31,67 @@ dotenv.config({ path: path.resolve(__dirname, '.env'), override: true });
 const app = express();
 
 // ─── Middleware ───────────────────────────────────────────
-app.use(cors({ origin: 'http://localhost:3000', credentials: true }));
-app.use(express.json());
+app.use((req, res, next) => {
+  req.requestId = crypto.randomUUID();
+  res.setHeader('X-Request-Id', req.requestId);
+  next();
+});
+const allowedOrigins = (process.env.FRONTEND_URLS || process.env.FRONTEND_URL || 'http://localhost:3000')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('Origin is not allowed by CORS'));
+  },
+  credentials: true,
+}));
+app.use(express.json({ limit: '200kb' }));
+app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 40, standardHeaders: true, legacyHeaders: false }));
+app.use('/api/chat', rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false }));
+app.use(['/api/bookings', '/api/leads'], rateLimit({ windowMs: 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false }));
 
 // ─── Config ───────────────────────────────────────────────
 const MONGO_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/tatamotors-ev';
-const JWT_SECRET = process.env.JWT_SECRET || 'tatamotors_ev_secret_2025';
-const N8N_BOOKING_WEBHOOK = process.env.N8N_BOOKING_WEBHOOK_URL || '';
+const JWT_SECRET = process.env.JWT_SECRET || 'development-only-change-me';
 const EV_API_KEY = process.env.EV_API_KEY || '';
 const EV_API_BASE = 'https://api.api-ninjas.com/v1';
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY || '';
 const MISTRAL_CHAT_MODEL = process.env.MISTRAL_CHAT_MODEL || 'mistral-small-latest';
 const MISTRAL_CHAT_URL = 'https://api.mistral.ai/v1/chat/completions';
 
-mongoose.connect(MONGO_URI)
-  .then(() => console.log('✅ MongoDB Connected:', MONGO_URI))
-  .catch(err => console.error('❌ MongoDB Error:', err.message));
+if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32)) {
+  throw new Error('JWT_SECRET must be set to at least 32 characters in production');
+}
+
+async function connectDatabase() {
+  try {
+    await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 10000 });
+    console.log('✅ MongoDB connected');
+    return true;
+  } catch (err) {
+    console.error('❌ MongoDB Error:', err.message);
+    return false;
+  }
+}
+
+app.use('/api', (req, res, next) => {
+  const databaseOptional = ['/health', '/chat'].includes(req.path) || req.path.startsWith('/ev/');
+  if (databaseOptional || mongoose.connection.readyState === 1) return next();
+  return res.status(503).json({
+    success: false,
+    message: 'Database is not connected. Start local MongoDB or check the Atlas URI, network access and DNS.',
+    requestId: req.requestId
+  });
+});
 
 // ============================================================
 // SCHEMAS & MODELS
 // ============================================================
 
-// 1. USER
-const userSchema = new mongoose.Schema({
-  name:      { type: String, required: true, trim: true },
-  email:     { type: String, required: true, unique: true, lowercase: true },
-  password:  { type: String, required: true, minlength: 6 },
-  phone:     { type: String, default: '' },
-  company:   { type: String, default: '' },
-  role:      { type: String, enum: ['admin', 'user'], default: 'user' },
-  lastLogin: { type: Date },
-  isActive:  { type: Boolean, default: true },
-}, { timestamps: true });
-
-userSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) return next();
-  this.password = await bcrypt.hash(this.password, 12);
-  next();
-});
-
-userSchema.methods.comparePassword = async function (candidate) {
-  return bcrypt.compare(candidate, this.password);
-};
-
-userSchema.methods.toJSON = function () {
-  const obj = this.toObject();
-  delete obj.password;
-  return obj;
-};
-
-const User = mongoose.model('User', userSchema);
-
-// 2. ENQUIRY (contact form)
+// Enquiry remains local; the main operational entities use the shared models.
 const enquirySchema = new mongoose.Schema({
   name:      { type: String, required: true },
   email:     { type: String, required: true },
@@ -86,38 +104,6 @@ const enquirySchema = new mongoose.Schema({
 }, { timestamps: true });
 
 const Enquiry = mongoose.model('Enquiry', enquirySchema);
-
-// 3. BOOKING (test ride / demo)
-const bookingSchema = new mongoose.Schema({
-  name:          { type: String, required: true },
-  email:         { type: String, required: true },
-  phone:         { type: String, required: true },
-  vehicle:       { type: String, default: '' },
-  date:          { type: Date, required: true },
-  timeSlot:      { type: String, required: true },
-  type:          { type: String, enum: ['test-ride', 'demo', 'service', 'consultation'], default: 'test-ride' },
-  location:      { type: String, default: '' },
-  notes:         { type: String, default: '' },
-  status:        { type: String, enum: ['pending', 'confirmed', 'completed', 'cancelled'], default: 'pending' },
-  reminderSent:  { type: Boolean, default: false },
-}, { timestamps: true });
-
-const Booking = mongoose.model('Booking', bookingSchema);
-
-// 4. LEAD (chatbot / booking / form leads)
-const leadSchema = new mongoose.Schema({
-  name:      { type: String, default: 'Visitor' },
-  email:     { type: String, default: '' },
-  phone:     { type: String, default: '' },
-  source:    { type: String, enum: ['chatbot', 'voice', 'form', 'booking', 'demo-booking'], default: 'chatbot' },
-  status:    { type: String, enum: ['new', 'contacted', 'qualified', 'converted', 'lost'], default: 'new' },
-  interest:  { type: String, default: 'general' },
-  vehicle:   { type: String, default: '' },
-  sessionId: { type: String, default: '' },
-  notes:     { type: String, default: '' },
-}, { timestamps: true });
-
-const Lead = mongoose.model('Lead', leadSchema);
 
 // ============================================================
 // INDIAN EV DATABASE (for EV Explorer / Comparator)
@@ -324,6 +310,17 @@ function searchIndianEVs(make, model) {
   });
 }
 
+function detectChatIntent(message) {
+  const text = String(message || '').toLowerCase();
+  if (/(test ride|test drive|book|appointment)/.test(text)) return 'test-ride';
+  if (/(price|cost|on-road|lakh|subsid)/.test(text)) return 'pricing';
+  if (/(charg|battery|station)/.test(text)) return 'charging';
+  if (/(service|repair|maintenance)/.test(text)) return 'service';
+  if (/(range|kilomet|km)/.test(text)) return 'range';
+  if (/(compare|versus|\bvs\b)/.test(text)) return 'comparison';
+  return 'general';
+}
+
 async function fetchFromAPINinjas(make, model) {
   try {
     const params = new URLSearchParams();
@@ -349,12 +346,17 @@ const authMiddleware = async (req, res, next) => {
     if (!token) return res.status(401).json({ success: false, message: 'No token provided' });
     const decoded = jwt.verify(token, JWT_SECRET);
     const user = await User.findById(decoded.userId);
-    if (!user) return res.status(401).json({ success: false, message: 'Invalid token' });
+    if (!user || !user.isActive) return res.status(401).json({ success: false, message: 'Invalid token' });
     req.user = user;
     next();
   } catch {
     res.status(401).json({ success: false, message: 'Token expired or invalid' });
   }
+};
+
+const requireRole = (...roles) => (req, res, next) => {
+  if (!roles.includes(req.user.role)) return res.status(403).json({ success: false, message: 'You do not have permission for this action.' });
+  return next();
 };
 
 // ============================================================
@@ -363,17 +365,33 @@ const authMiddleware = async (req, res, next) => {
 app.post('/api/auth/register', async (req, res) => {
   try {
     const { name, email, password, phone, company } = req.body;
-    if (!name || !email || !password)
+    const safeName = cleanText(name, 80);
+    const safeEmail = cleanText(email, 120).toLowerCase();
+    if (!safeName || !safeEmail || !password)
       return res.status(400).json({ success: false, message: 'Name, email and password required' });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(safeEmail)) return res.status(400).json({ success: false, message: 'Enter a valid email address.' });
+    if (String(password).length < 8 || String(password).length > 72) return res.status(400).json({ success: false, message: 'Password must be 8 to 72 characters.' });
 
-    const exists = await User.findOne({ email });
+    const exists = await User.findOne({ email: safeEmail });
     if (exists)
       return res.status(400).json({ success: false, message: 'Email already registered' });
 
-    const user = await User.create({ name, email, password, phone, company, role: 'admin' });
-    const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
+    const userCount = await User.countDocuments();
+    if (userCount > 0 && process.env.ALLOW_PUBLIC_REGISTRATION !== 'true') {
+      return res.status(403).json({ success: false, message: 'Public registration is closed. Ask the dealership owner for access.' });
+    }
 
-    console.log(`✅ New user registered: ${email}`);
+    const user = await User.create({
+      name: safeName,
+      email: safeEmail,
+      password,
+      phone: cleanText(phone, 30),
+      company: cleanText(company, 120),
+      role: userCount === 0 ? 'admin' : 'viewer'
+    });
+    const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '8h' });
+
+    console.log(`✅ New user registered: ${safeEmail}`);
     res.status(201).json({ success: true, message: 'Account created!', token, user: user.toJSON() });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -386,7 +404,8 @@ app.post('/api/auth/login', async (req, res) => {
     if (!email || !password)
       return res.status(400).json({ success: false, message: 'Email and password required' });
 
-    const user = await User.findOne({ email }).select('+password');
+    const safeEmail = cleanText(email, 120).toLowerCase();
+    const user = await User.findOne({ email: safeEmail }).select('+password');
     if (!user)
       return res.status(401).json({ success: false, message: 'Invalid email or password' });
 
@@ -397,8 +416,8 @@ app.post('/api/auth/login', async (req, res) => {
     user.lastLogin = new Date();
     await user.save();
 
-    const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
-    console.log(`✅ User logged in: ${email}`);
+    const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '8h' });
+    console.log(`✅ User logged in: ${safeEmail}`);
     res.json({ success: true, message: 'Login successful', token, user: user.toJSON() });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -409,7 +428,7 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
   res.json({ success: true, user: req.user });
 });
 
-app.get('/api/auth/users', authMiddleware, async (req, res) => {
+app.get('/api/auth/users', authMiddleware, requireRole('admin'), async (req, res) => {
   try {
     const users = await User.find().sort({ createdAt: -1 });
     res.json({ success: true, users, total: users.length });
@@ -427,16 +446,71 @@ app.post('/api/enquiry', async (req, res) => {
     if (!name || !email || !message)
       return res.status(400).json({ success: false, message: 'Name, email and message required' });
 
+    const detectedIntent = detectChatIntent(message);
+    const leadValidation = validateLead({
+      name,
+      email,
+      phone,
+      source: 'form',
+      interest: detectedIntent === 'test-ride' ? 'test-ride' : detectedIntent === 'pricing' ? 'purchase' : 'general',
+      notes: message
+    });
+    if (leadValidation.errors.length) {
+      return res.status(400).json({ success: false, message: leadValidation.errors[0], errors: leadValidation.errors });
+    }
+
     const enquiry = await Enquiry.create({
-      name, email, phone: phone || '', company: company || '', message,
+      name: leadValidation.value.name,
+      email: leadValidation.value.email,
+      phone: leadValidation.value.phone,
+      company: cleanText(company, 120),
+      message: cleanText(message, 2000),
       ipAddress: req.ip || '',
+    });
+
+    const identity = [{ email: leadValidation.value.email }];
+    if (leadValidation.value.phone) identity.push({ phone: leadValidation.value.phone });
+    const existingLead = await Lead.findOne({ $or: identity, archivedAt: { $exists: false } });
+    if (existingLead?.consent) {
+      leadValidation.value.consent = existingLead.consent.toObject ? existingLead.consent.toObject() : { ...existingLead.consent };
+    }
+    const qualification = qualifyLead(leadValidation.value);
+    const pipelineStatus = existingLead
+      ? qualification.temperature === 'hot' && ['new', 'contacted'].includes(existingLead.status) ? 'qualified' : existingLead.status
+      : qualification.temperature === 'hot' ? 'qualified' : 'new';
+    const lead = await Lead.findOneAndUpdate(
+      { $or: identity, archivedAt: { $exists: false } },
+      {
+        $set: {
+          ...leadValidation.value,
+          status: pipelineStatus,
+          score: qualification.score,
+          temperature: qualification.temperature,
+          scoreReasons: qualification.reasons,
+          nextBestAction: qualification.nextBestAction
+        },
+        $push: { activities: { type: 'enquiry.created', detail: detectedIntent, actor: 'customer' } }
+      },
+      { upsert: true, new: true, runValidators: true }
+    );
+    const automation = await dispatchAutomation('lead.qualified', {
+      leadId: lead._id,
+      enquiryId: enquiry._id,
+      name: lead.name,
+      email: lead.email,
+      phone: lead.phone,
+      score: lead.score,
+      temperature: lead.temperature,
+      nextBestAction: lead.nextBestAction
     });
 
     console.log(`📩 New enquiry from: ${name} (${email})`);
     res.status(201).json({
       success: true,
-      message: 'Enquiry submitted! We will contact you within 24 hours.',
+      message: 'Enquiry submitted and queued for dealership review.',
       enquiry,
+      leadId: lead._id,
+      automation,
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -458,7 +532,7 @@ app.get('/api/enquiry', authMiddleware, async (req, res) => {
   }
 });
 
-app.put('/api/enquiry/:id', authMiddleware, async (req, res) => {
+app.put('/api/enquiry/:id', authMiddleware, requireRole('admin', 'agent'), async (req, res) => {
   try {
     const enquiry = await Enquiry.findByIdAndUpdate(req.params.id, req.body, { new: true });
     if (!enquiry) return res.status(404).json({ success: false, message: 'Not found' });
@@ -469,182 +543,497 @@ app.put('/api/enquiry/:id', authMiddleware, async (req, res) => {
 });
 
 // ============================================================
-// BOOKING ROUTES — with n8n automation
+// BOOKING ROUTES — idempotent lifecycle + n8n events
 // ============================================================
-function validateBookingData(body) {
-  const errors = [];
-  if (!body.name || body.name.trim().length < 3) errors.push('Name must be at least 3 characters');
-  if (!body.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) errors.push('Valid email is required');
-  if (!body.phone || !/^[6-9]\d{9}$/.test(body.phone.replace(/\s/g, ''))) errors.push('Valid 10-digit Indian phone number is required');
-  if (!body.date) {
-    errors.push('Date is required');
-  } else {
-    const selected = new Date(body.date);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    if (selected < today) errors.push('Date cannot be in the past');
-  }
-  if (!body.timeSlot) errors.push('Time slot is required');
-  return errors;
+function createBookingCode() {
+  return `TEV-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+}
+
+async function recordBookingAutomation(booking, event) {
+  const result = await dispatchAutomation(event, {
+    bookingId: booking._id,
+    bookingCode: booking.bookingCode,
+    name: booking.name,
+    email: booking.email,
+    phone: booking.phone,
+    vehicle: booking.vehicle,
+    date: booking.date,
+    timeSlot: booking.timeSlot,
+    type: booking.type,
+    location: booking.location,
+    status: booking.status,
+    leadId: booking.leadId
+  });
+  booking.automation = {
+    status: result.status,
+    lastEvent: event,
+    lastAttemptAt: new Date(),
+    error: result.error || ''
+  };
+  await booking.save();
+  return result;
 }
 
 app.post('/api/bookings', async (req, res) => {
   try {
-    const { name, email, phone, vehicle, date, timeSlot, type, location, notes } = req.body;
+    const { errors, value } = validateBooking(req.body);
+    if (errors.length) return res.status(400).json({ success: false, message: errors[0], errors });
 
-    const validationErrors = validateBookingData(req.body);
-    if (validationErrors.length > 0) {
-      return res.status(400).json({ success: false, message: validationErrors[0], errors: validationErrors });
+    const idempotencyKey = cleanText(req.header('Idempotency-Key'), 120);
+    if (idempotencyKey) {
+      const previous = await Booking.findOne({ idempotencyKey });
+      if (previous) return res.json({ success: true, duplicate: true, message: 'Booking request already received.', booking: previous });
     }
 
-    const booking = await Booking.create({
-      name: name.trim(),
-      email: email.trim().toLowerCase(),
-      phone: phone.trim(),
-      vehicle: vehicle || '',
-      date, timeSlot,
-      type: type || 'test-ride',
-      location: location || '',
-      notes: notes || '',
-      status: 'pending',
+    const duplicate = await Booking.findOne({
+      phone: value.phone,
+      date: new Date(value.date),
+      timeSlot: value.timeSlot,
+      status: { $nin: ['cancelled', 'no-show'] }
     });
+    if (duplicate) {
+      return res.status(409).json({ success: false, message: 'This customer already has a booking in that time slot.', bookingCode: duplicate.bookingCode });
+    }
 
-    await Lead.findOneAndUpdate(
-      { email: booking.email },
-      { name: booking.name, email: booking.email, phone: booking.phone, source: 'demo-booking', interest: booking.type === 'test-ride' ? 'test-ride' : 'general', vehicle: booking.vehicle, status: 'contacted' },
-      { upsert: true, new: true }
+    const leadInput = {
+      name: value.name,
+      email: value.email,
+      phone: value.phone,
+      city: cleanText(req.body.city, 80),
+      source: 'booking',
+      interest: value.type === 'test-ride' ? 'test-ride' : 'general',
+      vehicle: value.vehicle,
+      budget: cleanText(req.body.budget, 30),
+      purchaseTimeline: cleanText(req.body.purchaseTimeline, 30),
+      consent: req.body.consent || {}
+    };
+    const leadValidation = validateLead(leadInput);
+    if (leadValidation.errors.length) return res.status(400).json({ success: false, message: leadValidation.errors[0], errors: leadValidation.errors });
+    const qualifiedInput = leadValidation.value;
+    const identity = [{ phone: value.phone }];
+    if (value.email) identity.push({ email: value.email });
+    const existingLead = await Lead.findOne({ $or: identity, archivedAt: { $exists: false } });
+    if (!Object.prototype.hasOwnProperty.call(req.body, 'consent') && existingLead?.consent) {
+      qualifiedInput.consent = existingLead.consent.toObject ? existingLead.consent.toObject() : { ...existingLead.consent };
+    }
+    const qualification = qualifyLead(qualifiedInput);
+    const pipelineStatus = existingLead
+      ? qualification.temperature === 'hot' && ['new', 'contacted'].includes(existingLead.status) ? 'qualified' : existingLead.status
+      : qualification.temperature === 'hot' ? 'qualified' : 'contacted';
+    const lead = await Lead.findOneAndUpdate(
+      { $or: identity, archivedAt: { $exists: false } },
+      {
+        $set: {
+          ...qualifiedInput,
+          score: qualification.score,
+          temperature: qualification.temperature,
+          scoreReasons: qualification.reasons,
+          nextBestAction: qualification.nextBestAction,
+          status: pipelineStatus
+        },
+        $push: { activities: { type: 'booking.created', detail: `${value.vehicle || value.type} on ${value.date}`, actor: 'customer' } }
+      },
+      { upsert: true, new: true, runValidators: true }
     );
 
-    console.log(`📅 New booking saved: ${booking.name} — ${booking.vehicle || booking.type} on ${booking.date} (ID: ${booking._id})`);
+    const booking = await Booking.create({
+      ...value,
+      date: new Date(value.date),
+      bookingCode: createBookingCode(),
+      leadId: lead._id,
+      idempotencyKey: idempotencyKey || undefined,
+      status: 'pending'
+    });
+    const automation = await recordBookingAutomation(booking, 'booking.created');
 
     res.status(201).json({
       success: true,
-      message: 'Booking confirmed! Check your email and WhatsApp shortly.',
+      message: 'Test-drive request saved. The dealership will confirm the slot shortly.',
       booking,
+      automation
     });
-
-    if (N8N_BOOKING_WEBHOOK) {
-      axios.post(N8N_BOOKING_WEBHOOK, {
-        bookingId: booking._id, name: booking.name, email: booking.email, phone: booking.phone,
-        vehicle: booking.vehicle, date: booking.date, timeSlot: booking.timeSlot,
-        type: booking.type, location: booking.location, notes: booking.notes, createdAt: booking.createdAt,
-      }, { timeout: 10000 })
-        .then(() => console.log(`✅ n8n automation triggered for booking ${booking._id}`))
-        .catch(err => console.error(`⚠️ n8n webhook failed (booking still saved OK):`, err.message));
-    } else {
-      console.log('ℹ️ N8N_BOOKING_WEBHOOK_URL not set — skipping automation trigger');
-    }
   } catch (err) {
     console.error('Booking creation error:', err.message);
-    res.status(500).json({ success: false, message: 'Server error while saving booking. Please try again.' });
+    const duplicateKey = err.code === 11000;
+    res.status(duplicateKey ? 409 : 500).json({ success: false, message: duplicateKey ? 'This booking request was already submitted.' : 'Server error while saving booking. Please try again.' });
   }
 });
 
 app.get('/api/bookings', authMiddleware, async (req, res) => {
   try {
-    const { status, type } = req.query;
+    const { page, limit } = safePagination(req.query);
     const filter = {};
-    if (status) filter.status = status;
-    if (type) filter.type = type;
-    const bookings = await Booking.find(filter).sort({ date: 1 });
-    res.json({ success: true, bookings, total: bookings.length });
+    if (req.query.status) filter.status = req.query.status;
+    if (req.query.type) filter.type = req.query.type;
+    if (req.query.upcoming === 'true') filter.date = { $gte: new Date() };
+    const [bookings, total] = await Promise.all([
+      Booking.find(filter).sort({ date: 1 }).skip((page - 1) * limit).limit(limit),
+      Booking.countDocuments(filter)
+    ]);
+    res.json({ success: true, bookings, total, page, pages: Math.ceil(total / limit) });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'Unable to load bookings.' });
   }
 });
 
-app.put('/api/bookings/:id', authMiddleware, async (req, res) => {
+app.put('/api/bookings/:id', authMiddleware, requireRole('admin', 'agent'), async (req, res) => {
   try {
-    const booking = await Booking.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const booking = await Booking.findById(req.params.id);
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
-    res.json({ success: true, booking });
+    const previousStatus = booking.status;
+    const allowed = {
+      pending: ['confirmed', 'cancelled'],
+      confirmed: ['completed', 'cancelled', 'no-show'],
+      completed: [],
+      cancelled: [],
+      'no-show': ['confirmed']
+    };
+    if (req.body.status && req.body.status !== booking.status && !allowed[booking.status]?.includes(req.body.status)) {
+      return res.status(400).json({ success: false, message: `Cannot move booking from ${booking.status} to ${req.body.status}.` });
+    }
+    if (req.body.status) booking.status = req.body.status;
+    if (req.body.notes !== undefined) booking.notes = cleanText(req.body.notes, 1000);
+    await booking.save();
+    const automation = req.body.status && booking.status !== previousStatus
+      ? await recordBookingAutomation(booking, `booking.${booking.status}`)
+      : { status: booking.automation?.status || 'not-configured', event: null };
+    res.json({ success: true, booking, automation });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'Unable to update booking.' });
+  }
+});
+
+app.post('/api/bookings/:id/reschedule', authMiddleware, requireRole('admin', 'agent'), async (req, res) => {
+  try {
+    const { errors, value } = validateBooking({ date: req.body.date, timeSlot: req.body.timeSlot }, { partial: true });
+    if (errors.length) return res.status(400).json({ success: false, message: errors[0], errors });
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+    if (['completed', 'cancelled'].includes(booking.status)) return res.status(400).json({ success: false, message: 'Completed or cancelled bookings cannot be rescheduled.' });
+    const clash = await Booking.findOne({
+      _id: { $ne: booking._id },
+      phone: booking.phone,
+      date: new Date(value.date),
+      timeSlot: value.timeSlot,
+      status: { $nin: ['cancelled', 'no-show'] }
+    });
+    if (clash) return res.status(409).json({ success: false, message: 'This customer already has another booking in that time slot.' });
+    booking.rescheduleHistory.push({
+      fromDate: booking.date,
+      fromTimeSlot: booking.timeSlot,
+      toDate: new Date(value.date),
+      toTimeSlot: value.timeSlot,
+      changedBy: req.user.email
+    });
+    booking.date = new Date(value.date);
+    booking.timeSlot = value.timeSlot;
+    booking.status = 'pending';
+    await booking.save();
+    const automation = await recordBookingAutomation(booking, 'booking.rescheduled');
+    res.json({ success: true, booking, automation });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Unable to reschedule booking.' });
+  }
+});
+
+app.post('/api/bookings/:id/cancel', authMiddleware, requireRole('admin', 'agent'), async (req, res) => {
+  try {
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+    if (booking.status === 'completed') return res.status(400).json({ success: false, message: 'A completed booking cannot be cancelled.' });
+    if (booking.status === 'cancelled') return res.json({ success: true, duplicate: true, booking, automation: { status: booking.automation?.status || 'not-configured', event: null } });
+    booking.status = 'cancelled';
+    booking.cancellationReason = cleanText(req.body.reason, 500);
+    await booking.save();
+    const automation = await recordBookingAutomation(booking, 'booking.cancelled');
+    res.json({ success: true, booking, automation });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Unable to cancel booking.' });
   }
 });
 
 // ============================================================
-// LEADS ROUTES
+// LEADS ROUTES — qualification, follow-up and human handoff
 // ============================================================
-app.post('/api/leads', async (req, res) => {
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function qualifyAndSaveLead(req, res) {
   try {
-    const lead = await Lead.create(req.body);
-    res.status(201).json({ success: true, lead });
+    const { errors, value } = validateLead(req.body);
+    if (errors.length) return res.status(400).json({ success: false, message: errors[0], errors });
+    const identity = [];
+    if (value.email) identity.push({ email: value.email });
+    if (value.phone) identity.push({ phone: value.phone });
+    const existingLead = await Lead.findOne({ $or: identity, archivedAt: { $exists: false } });
+    if (!Object.prototype.hasOwnProperty.call(req.body, 'consent') && existingLead?.consent) {
+      value.consent = existingLead.consent.toObject ? existingLead.consent.toObject() : { ...existingLead.consent };
+    }
+    const qualification = qualifyLead(value);
+    const pipelineStatus = existingLead
+      ? qualification.temperature === 'hot' && ['new', 'contacted'].includes(existingLead.status) ? 'qualified' : existingLead.status
+      : qualification.temperature === 'hot' ? 'qualified' : 'new';
+    const lead = await Lead.findOneAndUpdate(
+      { $or: identity, archivedAt: { $exists: false } },
+      {
+        $set: {
+          ...value,
+          score: qualification.score,
+          temperature: qualification.temperature,
+          scoreReasons: qualification.reasons,
+          nextBestAction: qualification.nextBestAction,
+          status: pipelineStatus
+        },
+        $push: { activities: { type: 'lead.qualified', detail: `Score ${qualification.score} (${qualification.temperature})`, actor: 'system' } }
+      },
+      { upsert: true, new: true, runValidators: true }
+    );
+    const automation = await dispatchAutomation('lead.qualified', {
+      leadId: lead._id,
+      name: lead.name,
+      email: lead.email,
+      phone: lead.phone,
+      city: lead.city,
+      vehicle: lead.vehicle,
+      score: lead.score,
+      temperature: lead.temperature,
+      nextBestAction: lead.nextBestAction
+    });
+    res.status(201).json({ success: true, lead, qualification, automation });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'Unable to qualify and save this lead.' });
   }
-});
+}
+
+app.post('/api/leads', qualifyAndSaveLead);
+app.post('/api/leads/qualify', qualifyAndSaveLead);
 
 app.get('/api/leads', authMiddleware, async (req, res) => {
   try {
-    const { status, source, search } = req.query;
-    const filter = {};
-    if (status) filter.status = status;
-    if (source) filter.source = source;
-    if (search) filter.$or = [
-      { name: { $regex: search, $options: 'i' } },
-      { email: { $regex: search, $options: 'i' } },
-    ];
-    const leads = await Lead.find(filter).sort({ createdAt: -1 });
-    res.json({ success: true, leads, total: leads.length });
+    const { page, limit } = safePagination(req.query);
+    const filter = { archivedAt: { $exists: false } };
+    if (req.query.status) filter.status = req.query.status;
+    if (req.query.source) filter.source = req.query.source;
+    if (req.query.temperature) filter.temperature = req.query.temperature;
+    if (req.query.attention === 'true') {
+      filter.$or = [
+        { temperature: 'hot', status: { $nin: ['converted', 'lost'] } },
+        { 'handoff.status': 'requested' },
+        { 'followUp.status': 'scheduled', 'followUp.scheduledAt': { $lte: new Date() } }
+      ];
+    }
+    if (req.query.search) {
+      const search = escapeRegex(cleanText(req.query.search, 80));
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } },
+        { vehicle: { $regex: search, $options: 'i' } }
+      ];
+    }
+    const [leads, total] = await Promise.all([
+      Lead.find(filter).sort({ score: -1, createdAt: -1 }).skip((page - 1) * limit).limit(limit),
+      Lead.countDocuments(filter)
+    ]);
+    res.json({ success: true, leads, total, page, pages: Math.ceil(total / limit) });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'Unable to load leads.' });
   }
 });
 
-app.put('/api/leads/:id', authMiddleware, async (req, res) => {
+app.get('/api/leads/:id', authMiddleware, async (req, res) => {
   try {
-    const lead = await Lead.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const lead = await Lead.findOne({ _id: req.params.id, archivedAt: { $exists: false } }).populate('assignedTo', 'name email');
+    if (!lead) return res.status(404).json({ success: false, message: 'Lead not found' });
+    res.json({ success: true, lead });
+  } catch {
+    res.status(400).json({ success: false, message: 'Invalid lead id.' });
+  }
+});
+
+app.put('/api/leads/:id', authMiddleware, requireRole('admin', 'agent'), async (req, res) => {
+  try {
+    const lead = await Lead.findOne({ _id: req.params.id, archivedAt: { $exists: false } });
+    if (!lead) return res.status(404).json({ success: false, message: 'Lead not found' });
+    const allowed = ['name', 'email', 'phone', 'city', 'source', 'status', 'interest', 'vehicle', 'budget', 'purchaseTimeline', 'notes', 'tags', 'assignedTo', 'consent'];
+    const updates = Object.fromEntries(Object.entries(req.body).filter(([key]) => allowed.includes(key)));
+    const validated = validateLead({ ...lead.toObject(), ...updates });
+    if (validated.errors.length) return res.status(400).json({ success: false, message: validated.errors[0], errors: validated.errors });
+    Object.assign(lead, updates);
+    ['name', 'email', 'phone', 'city', 'source', 'interest', 'vehicle', 'budget', 'purchaseTimeline', 'notes'].forEach((field) => {
+      if (updates[field] !== undefined) lead[field] = validated.value[field];
+    });
+    if (updates.consent !== undefined) lead.consent = validated.value.consent;
+    const qualification = qualifyLead(lead.toObject());
+    lead.score = qualification.score;
+    lead.temperature = qualification.temperature;
+    lead.scoreReasons = qualification.reasons;
+    lead.nextBestAction = qualification.nextBestAction;
+    if (updates.status === 'converted' && !lead.convertedAt) lead.convertedAt = new Date();
+    lead.activities.push({ type: 'lead.updated', detail: Object.keys(updates).join(', '), actor: req.user.email });
+    await lead.save();
     res.json({ success: true, lead });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(400).json({ success: false, message: err.message });
   }
 });
 
-app.delete('/api/leads/:id', authMiddleware, async (req, res) => {
+app.post('/api/leads/:id/follow-up', authMiddleware, requireRole('admin', 'agent'), async (req, res) => {
   try {
-    await Lead.findByIdAndDelete(req.params.id);
-    res.json({ success: true, message: 'Lead deleted' });
+    const lead = await Lead.findOne({ _id: req.params.id, archivedAt: { $exists: false } });
+    if (!lead) return res.status(404).json({ success: false, message: 'Lead not found' });
+    if (lead.automationPaused) return res.status(409).json({ success: false, message: 'Automation is paused for this lead because a human handoff is active.' });
+    const channel = ['whatsapp', 'email', 'call'].includes(req.body.channel) ? req.body.channel : 'whatsapp';
+    if (channel === 'whatsapp' && !lead.consent?.whatsapp) {
+      return res.status(400).json({ success: false, message: 'WhatsApp consent is required before automated follow-up.' });
+    }
+    if (channel === 'email' && !lead.email) return res.status(400).json({ success: false, message: 'This lead does not have an email address.' });
+    if (channel === 'call' && !lead.phone) return res.status(400).json({ success: false, message: 'This lead does not have a phone number.' });
+    const scheduledAt = req.body.scheduledAt ? new Date(req.body.scheduledAt) : new Date();
+    if (Number.isNaN(scheduledAt.getTime())) return res.status(400).json({ success: false, message: 'Invalid follow-up date.' });
+    const event = scheduledAt > new Date(Date.now() + 60 * 1000) ? 'lead.followup.scheduled' : 'lead.followup.requested';
+    lead.followUp = { channel, scheduledAt, status: 'scheduled', error: '' };
+    lead.activities.push({ type: event, detail: `${channel} at ${scheduledAt.toISOString()}`, actor: req.user.email });
+    await lead.save();
+    const automation = await dispatchAutomation(event, {
+      leadId: lead._id,
+      name: lead.name,
+      phone: lead.phone,
+      email: lead.email,
+      vehicle: lead.vehicle,
+      channel,
+      scheduledAt,
+      message: cleanText(req.body.message, 1000),
+      score: lead.score,
+      temperature: lead.temperature
+    });
+    lead.followUp.status = automation.status === 'delivered' ? (event.endsWith('scheduled') ? 'scheduled' : 'triggered') : 'failed';
+    lead.followUp.lastAttemptAt = new Date();
+    lead.followUp.error = automation.error || (automation.status === 'not-configured' ? 'n8n webhook is not configured' : '');
+    await lead.save();
+    res.json({ success: true, lead, automation });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'Unable to schedule follow-up.' });
+  }
+});
+
+app.post('/api/leads/:id/handoff', authMiddleware, requireRole('admin', 'agent'), async (req, res) => {
+  try {
+    const lead = await Lead.findOne({ _id: req.params.id, archivedAt: { $exists: false } });
+    if (!lead) return res.status(404).json({ success: false, message: 'Lead not found' });
+    lead.automationPaused = true;
+    lead.assignedTo = req.body.assignedTo || req.user._id;
+    lead.handoff = {
+      status: 'requested',
+      reason: cleanText(req.body.reason || 'Customer needs human assistance', 500),
+      requestedAt: new Date()
+    };
+    lead.activities.push({ type: 'lead.handoff.requested', detail: lead.handoff.reason, actor: req.user.email });
+    await lead.save();
+    const automation = await dispatchAutomation('lead.handoff.requested', {
+      leadId: lead._id,
+      name: lead.name,
+      phone: lead.phone,
+      email: lead.email,
+      reason: lead.handoff.reason,
+      assignedTo: lead.assignedTo
+    });
+    res.json({ success: true, lead, automation });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Unable to request human handoff.' });
+  }
+});
+
+app.delete('/api/leads/:id', authMiddleware, requireRole('admin'), async (req, res) => {
+  try {
+    const lead = await Lead.findByIdAndUpdate(req.params.id, { archivedAt: new Date(), automationPaused: true }, { new: true });
+    if (!lead) return res.status(404).json({ success: false, message: 'Lead not found' });
+    res.json({ success: true, message: 'Lead archived' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Unable to archive lead.' });
   }
 });
 
 // ============================================================
-// ANALYTICS ROUTE
+// ANALYTICS ROUTES — owner operations view
 // ============================================================
+async function buildOwnerStats() {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const activeLead = { archivedAt: { $exists: false } };
+    const [
+      totalUsers, totalEnquiries, newEnquiries, totalBookings, pendingBookings,
+      completedBookings, upcomingBookingsCount, totalLeads, newLeads, convertedLeads,
+      hotLeads, warmLeads, followUpsDue, handoffsRequested, bookingAutomationFailures, leadAutomationFailures,
+      totalChats, recentChats, dailyLeads, leadsBySource, leadsByStatus, leadsByTemperature, bookingsByStatus,
+      bookingsByType, attentionQueue, upcomingBookings, scoreSummary
+    ] = await Promise.all([
+      User.countDocuments(),
+      Enquiry.countDocuments(),
+      Enquiry.countDocuments({ status: 'new' }),
+      Booking.countDocuments(),
+      Booking.countDocuments({ status: 'pending' }),
+      Booking.countDocuments({ status: 'completed' }),
+      Booking.countDocuments({ date: { $gte: new Date() }, status: { $in: ['pending', 'confirmed'] } }),
+      Lead.countDocuments(activeLead),
+      Lead.countDocuments({ ...activeLead, createdAt: { $gte: sevenDaysAgo } }),
+      Lead.countDocuments({ ...activeLead, status: 'converted' }),
+      Lead.countDocuments({ ...activeLead, temperature: 'hot', status: { $nin: ['converted', 'lost'] } }),
+      Lead.countDocuments({ ...activeLead, temperature: 'warm', status: { $nin: ['converted', 'lost'] } }),
+      Lead.countDocuments({ ...activeLead, 'followUp.status': 'scheduled', 'followUp.scheduledAt': { $lte: new Date() } }),
+      Lead.countDocuments({ ...activeLead, 'handoff.status': 'requested' }),
+      Booking.countDocuments({ 'automation.status': 'failed' }),
+      Lead.countDocuments({ ...activeLead, 'followUp.status': 'failed' }),
+      ChatSession.countDocuments(),
+      ChatSession.countDocuments({ createdAt: { $gte: sevenDaysAgo } }),
+      Lead.aggregate([
+        { $match: { ...activeLead, createdAt: { $gte: sevenDaysAgo } } },
+        { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ]),
+      Lead.aggregate([{ $match: activeLead }, { $group: { _id: '$source', count: { $sum: 1 } } }]),
+      Lead.aggregate([{ $match: activeLead }, { $group: { _id: '$status', count: { $sum: 1 } } }]),
+      Lead.aggregate([{ $match: activeLead }, { $group: { _id: '$temperature', count: { $sum: 1 } } }]),
+      Booking.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
+      Booking.aggregate([{ $group: { _id: '$type', count: { $sum: 1 } } }]),
+      Lead.find({
+        ...activeLead,
+        status: { $nin: ['converted', 'lost'] },
+        $or: [{ temperature: 'hot' }, { 'handoff.status': 'requested' }, { 'followUp.status': 'failed' }]
+      }).sort({ score: -1, createdAt: 1 }).limit(6).select('name vehicle score temperature nextBestAction followUp handoff createdAt'),
+      Booking.find({ date: { $gte: new Date() }, status: { $in: ['pending', 'confirmed'] } })
+        .sort({ date: 1 }).limit(6).select('bookingCode name vehicle date timeSlot status automation'),
+      Lead.aggregate([{ $match: activeLead }, { $group: { _id: null, average: { $avg: '$score' } } }])
+    ]);
+
+    const conversionRate = totalLeads ? Number(((convertedLeads / totalLeads) * 100).toFixed(1)) : 0;
+    const bookingCompletionRate = totalBookings ? Number(((completedBookings / totalBookings) * 100).toFixed(1)) : 0;
+    return {
+      totalUsers, totalEnquiries, newEnquiries, totalBookings, pendingBookings, completedBookings,
+      upcomingBookingsCount, totalLeads, newLeads, convertedLeads, hotLeads, warmLeads,
+      followUpsDue, handoffsRequested, automationFailures: bookingAutomationFailures + leadAutomationFailures, conversionRate, bookingCompletionRate,
+      averageLeadScore: Number((scoreSummary[0]?.average || 0).toFixed(1)),
+      totalChats,
+      recentChats,
+      dailyLeads, leadsBySource, leadsByStatus, leadsByTemperature, bookingsByStatus, bookingsByType,
+      attentionQueue, upcomingBookings,
+      generatedAt: new Date()
+    };
+}
+
 app.get('/api/analytics/dashboard', authMiddleware, async (req, res) => {
   try {
-    const [totalUsers, totalEnquiries, newEnquiries, totalBookings, pendingBookings, totalLeads, convertedLeads] = await Promise.all([
-      User.countDocuments(), Enquiry.countDocuments(), Enquiry.countDocuments({ status: 'new' }),
-      Booking.countDocuments(), Booking.countDocuments({ status: 'pending' }),
-      Lead.countDocuments(), Lead.countDocuments({ status: 'converted' }),
-    ]);
-
-    const conversionRate = totalLeads > 0 ? ((convertedLeads / totalLeads) * 100).toFixed(1) : 0;
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-
-    const dailyLeads = await Lead.aggregate([
-      { $match: { createdAt: { $gte: sevenDaysAgo } } },
-      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, count: { $sum: 1 } } },
-      { $sort: { _id: 1 } },
-    ]);
-
-    const leadsBySource = await Lead.aggregate([{ $group: { _id: '$source', count: { $sum: 1 } } }]);
-    const leadsByStatus = await Lead.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]);
-
-    res.json({
-      success: true,
-      stats: {
-        totalUsers, totalEnquiries, newEnquiries, totalBookings, pendingBookings,
-        totalLeads, convertedLeads, conversionRate: parseFloat(conversionRate),
-        dailyLeads, leadsBySource, leadsByStatus,
-        totalChats: totalLeads, recentChats: newEnquiries,
-        newLeads: await Lead.countDocuments({ createdAt: { $gte: sevenDaysAgo } }),
-      },
-    });
+    res.json({ success: true, stats: await buildOwnerStats() });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'Unable to calculate dashboard metrics.' });
+  }
+});
+
+app.get('/api/analytics/owner', authMiddleware, async (req, res) => {
+  try {
+    res.json({ success: true, stats: await buildOwnerStats() });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Unable to calculate owner metrics.' });
   }
 });
 
@@ -655,6 +1044,7 @@ app.post('/api/chat', async (req, res) => {
   try {
     const { message, history, sessionId, visitorName, visitorEmail } = req.body;
     const question = String(message || '').trim();
+    const activeSessionId = cleanText(sessionId, 120) || `s_${crypto.randomUUID()}`;
 
     if (!question) {
       return res.status(400).json({ success: false, message: 'Message required' });
@@ -664,10 +1054,28 @@ app.post('/api/chat', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Message is too long' });
     }
 
-    if (visitorEmail) {
-      await Lead.findOneAndUpdate(
-        { email: visitorEmail },
-        { name: visitorName || 'Visitor', email: visitorEmail, source: 'chatbot', sessionId },
+    let leadRecord = null;
+    if (visitorEmail && mongoose.connection.readyState === 1) {
+      const chatLead = {
+        name: cleanText(visitorName || 'Visitor', 80),
+        email: cleanText(visitorEmail, 120).toLowerCase(),
+        source: 'chatbot',
+        sessionId: activeSessionId,
+        interest: detectChatIntent(question) === 'test-ride' ? 'test-ride' : 'general'
+      };
+      const qualification = qualifyLead(chatLead);
+      leadRecord = await Lead.findOneAndUpdate(
+        { email: chatLead.email },
+        {
+          $set: {
+            ...chatLead,
+            score: qualification.score,
+            temperature: qualification.temperature,
+            scoreReasons: qualification.reasons,
+            nextBestAction: qualification.nextBestAction
+          },
+          $push: { activities: { type: 'chat.message', detail: detectChatIntent(question), actor: 'customer' } }
+        },
         { upsert: true, new: true }
       );
     }
@@ -684,14 +1092,63 @@ app.post('/api/chat', async (req, res) => {
       response = getLocalEVAnswer(question);
     }
 
+    const intent = detectChatIntent(question);
+    if (mongoose.connection.readyState === 1) {
+      await ChatSession.findOneAndUpdate(
+        { sessionId: activeSessionId },
+        {
+          $set: {
+            visitorName: cleanText(visitorName || 'Visitor', 80),
+            visitorEmail: cleanText(visitorEmail, 120).toLowerCase(),
+            intent,
+            ...(leadRecord ? { leadId: leadRecord._id } : {})
+          },
+          $push: {
+            messages: {
+              $each: [
+                { role: 'user', content: question, timestamp: new Date() },
+                { role: 'assistant', content: response, timestamp: new Date() }
+              ]
+            }
+          }
+        },
+        { upsert: true, new: true, runValidators: true }
+      );
+    }
+
     res.json({
       success: true,
       response,
       mode,
-      sessionId: sessionId || `s_${Date.now()}`,
+      intent,
+      sessionId: activeSessionId,
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.get('/api/chat/sessions', authMiddleware, async (req, res) => {
+  try {
+    const { page, limit } = safePagination(req.query);
+    const filter = req.query.status ? { status: req.query.status } : {};
+    const [sessions, total] = await Promise.all([
+      ChatSession.find(filter).sort({ updatedAt: -1 }).skip((page - 1) * limit).limit(limit),
+      ChatSession.countDocuments(filter)
+    ]);
+    res.json({ success: true, sessions, total, page, pages: Math.ceil(total / limit) });
+  } catch {
+    res.status(500).json({ success: false, message: 'Unable to load conversations.' });
+  }
+});
+
+app.get('/api/chat/session/:sessionId', authMiddleware, async (req, res) => {
+  try {
+    const session = await ChatSession.findOne({ sessionId: cleanText(req.params.sessionId, 120) });
+    if (!session) return res.status(404).json({ success: false, message: 'Conversation not found.' });
+    res.json({ success: true, session });
+  } catch {
+    res.status(500).json({ success: false, message: 'Unable to load conversation.' });
   }
 });
 
@@ -778,24 +1235,51 @@ app.get('/api/health', (req, res) => {
       mode: MISTRAL_API_KEY ? 'mistral' : 'local',
       mistralConfigured: Boolean(MISTRAL_API_KEY),
     },
+    automation: {
+      configured: Boolean(process.env.N8N_AUTOMATION_WEBHOOK_URL || process.env.N8N_BOOKING_WEBHOOK_URL || process.env.N8N_LEAD_WEBHOOK_URL),
+      signatureConfigured: Boolean(process.env.N8N_WEBHOOK_SECRET),
+    },
+    requestId: req.requestId,
     timestamp: new Date(),
   });
+});
+
+app.use((req, res) => {
+  res.status(404).json({ success: false, message: 'API route not found.', requestId: req.requestId });
+});
+
+app.use((err, req, res, next) => {
+  console.error(`Request ${req.requestId} failed:`, err.message);
+  if (res.headersSent) return next(err);
+  return res.status(500).json({ success: false, message: 'Unexpected server error.', requestId: req.requestId });
 });
 
 // ============================================================
 // START SERVER
 // ============================================================
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`\n🚀 TataEV Server running on http://localhost:${PORT}`);
-  console.log(`📊 API Endpoints:`);
-  console.log(`   POST /api/auth/register       → Register user`);
-  console.log(`   POST /api/auth/login          → Login user`);
-  console.log(`   POST /api/enquiry             → Save contact form`);
-  console.log(`   POST /api/bookings            → Save test ride booking (+ n8n)`);
-  console.log(`   POST /api/chat                → Chatbot messages`);
-  console.log(`   GET  /api/ev/search           → Search EVs (Indian + global)`);
-  console.log(`   GET  /api/ev/compare          → Compare 2 EVs`);
-  console.log(`   GET  /api/analytics/dashboard → Dashboard stats`);
-  console.log(`   GET  /api/health              → Health check\n`);
-});
+function startServer(port = PORT) {
+  const server = app.listen(port, () => {
+    console.log(`\n🚀 TataEV Server running on http://localhost:${port}`);
+    console.log(`📊 API Endpoints:`);
+    console.log(`   POST /api/auth/register       → Register user`);
+    console.log(`   POST /api/auth/login          → Login user`);
+    console.log(`   POST /api/enquiry             → Save contact form`);
+    console.log(`   POST /api/bookings            → Save test ride booking (+ n8n)`);
+    console.log(`   POST /api/leads/qualify        → Score and capture a lead`);
+    console.log(`   POST /api/leads/:id/follow-up  → Trigger consent-aware follow-up`);
+    console.log(`   POST /api/leads/:id/handoff    → Pause AI and assign a human`);
+    console.log(`   POST /api/chat                → Chatbot messages`);
+    console.log(`   GET  /api/ev/search           → Search EVs (Indian + global)`);
+    console.log(`   GET  /api/ev/compare          → Compare 2 EVs`);
+    console.log(`   GET  /api/analytics/dashboard → Dashboard stats`);
+    console.log(`   GET  /api/analytics/owner     → Owner operations metrics`);
+    console.log(`   GET  /api/health              → Health check\n`);
+  });
+  connectDatabase();
+  return server;
+}
+
+if (require.main === module) startServer();
+
+module.exports = { app, connectDatabase, startServer };

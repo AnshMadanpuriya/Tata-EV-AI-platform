@@ -137,7 +137,7 @@ export default function LoginPage() {
                 <input
                   required type={showPass ? 'text' : 'password'}
                   value={form.password} onChange={set('password')}
-                  placeholder="Min 6 characters" minLength={6}
+                  placeholder="Min 8 characters" minLength={8}
                   style={{ ...inputStyle, paddingRight: 44 }}
                   onFocus={e => e.target.style.borderColor = '#0066FF'}
                   onBlur={e => e.target.style.borderColor = '#1A2540'}
@@ -179,33 +179,6 @@ export default function LoginPage() {
             </button>
           </form>
 
-          {/* Demo credentials */}
-          {mode === 'login' && (
-            <div style={{
-              marginTop: 18, background: '#080C14', border: '1px solid #1A2540',
-              borderRadius: 10, padding: '12px 14px',
-            }}>
-              <div style={{ fontSize: 10, color: '#6B7280', fontFamily: 'monospace', marginBottom: 6 }}>
-                DEMO CREDENTIALS
-              </div>
-              <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 2 }}>
-                Email: <span style={{ color: '#00D4FF', fontFamily: 'monospace' }}>demo@tatamotors.com</span>
-              </div>
-              <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 8 }}>
-                Password: <span style={{ color: '#00D4FF', fontFamily: 'monospace' }}>demo1234</span>
-              </div>
-              <button
-                onClick={() => setForm(p => ({ ...p, email: 'demo@tatamotors.com', password: 'demo1234' }))}
-                style={{
-                  background: 'rgba(0,102,255,0.1)', border: '1px solid rgba(0,102,255,0.2)',
-                  color: '#60A5FA', borderRadius: 6, padding: '5px 12px',
-                  fontSize: 11, cursor: 'pointer',
-                }}
-              >
-                Auto-fill →
-              </button>
-            </div>
-          )}
         </div>
 
         {/* DB info */}
@@ -213,7 +186,7 @@ export default function LoginPage() {
           marginTop: 16, textAlign: 'center',
           fontSize: 11, color: '#374151', fontFamily: 'monospace',
         }}>
-          🔒 Data securely stored in MongoDB · JWT Authentication
+          🔒 MongoDB persistence · JWT-protected dashboard
         </div>
 
         <div style={{ textAlign: 'center', marginTop: 12 }}>

@@ -1,12 +1,18 @@
 # ⚡ Tata Motors EV — AI Voice & Chat Agent Platform
 
-> A production-ready full-stack SaaS application for AI-powered Electric Vehicle customer interactions.
+> A production-focused EV dealership automation MVP for AI-powered customer interactions and sales operations.
 
 ![Stack](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react)
 ![Stack](https://img.shields.io/badge/Node.js-Express-339933?style=flat-square&logo=node.js)
 ![Stack](https://img.shields.io/badge/MongoDB-7-47A248?style=flat-square&logo=mongodb)
 ![Stack](https://img.shields.io/badge/n8n-Automation-EA4B71?style=flat-square)
 ![Stack](https://img.shields.io/badge/Tailwind-CSS-06B6D4?style=flat-square&logo=tailwindcss)
+
+---
+
+## Phase 1 production MVP
+
+The `feature/production-mvp` branch adds auditable lead scoring, consent-aware follow-ups, human handoff, an idempotent test-drive lifecycle, n8n event delivery and a live owner command centre. See [docs/PHASE_1_PRODUCTION_MVP.md](docs/PHASE_1_PRODUCTION_MVP.md) for setup, API contracts and the decisions still required before public launch.
 
 ---
 
@@ -39,7 +45,8 @@ tata-motors-ev/
 │   └── .env.example
 │
 └── n8n-samples/
-    └── webhook-flow.json      # n8n workflow nodes + setup guide
+    ├── webhook-flow.json      # Chat workflow starter
+    └── phase1-automation-workflow.json # Lead/booking event gateway
 ```
 
 ---
@@ -47,7 +54,7 @@ tata-motors-ev/
 ## 🚀 Quick Start
 
 ### Prerequisites
-- **Node.js** >= 18.x
+- **Node.js** >= 20.x
 - **MongoDB** (local or Atlas)
 - **n8n** (optional, for AI workflow)
 
@@ -76,10 +83,11 @@ Edit `.env`:
 ```env
 PORT=5000
 MONGODB_URI=mongodb://localhost:27017/tata-motors-ev
-JWT_SECRET=your_super_secret_jwt_key_here
-N8N_WEBHOOK_URL=http://localhost:5678/webhook/ev-agent
+JWT_SECRET=replace_with_a_random_secret_of_at_least_32_characters
+N8N_AUTOMATION_WEBHOOK_URL=http://localhost:5678/webhook/tataev-automation
+N8N_WEBHOOK_SECRET=replace_with_a_webhook_signing_secret
 NODE_ENV=development
-FRONTEND_URL=http://localhost:3000
+FRONTEND_URLS=http://localhost:3000
 ```
 
 Start backend:
@@ -140,15 +148,7 @@ npm install -g n8n
 n8n start
 ```
 
-Open **http://localhost:5678** and:
-1. Create a new workflow
-2. Add **Webhook** node → Path: `ev-agent`, Method: `POST`
-3. Add **OpenAI** node with your system prompt
-4. Add **Respond to Webhook** node to return AI response
-5. Activate workflow
-6. Set `N8N_WEBHOOK_URL=http://localhost:5678/webhook/ev-agent` in backend `.env`
-
-See `n8n-samples/webhook-flow.json` for the full node configuration.
+Open **http://localhost:5678**, import `n8n-samples/phase1-automation-workflow.json`, activate it, and set `N8N_AUTOMATION_WEBHOOK_URL=http://localhost:5678/webhook/tataev-automation`. Connect your approved WhatsApp/email/CRM provider nodes after the validation node. The existing `webhook-flow.json` remains available as a chat workflow starter.
 
 ---
 
@@ -175,31 +175,39 @@ POST /api/auth/login        { email, password }
 GET  /api/auth/me           (JWT required)
 ```
 
+The first registered account becomes the owner admin. Later public registrations are blocked unless `ALLOW_PUBLIC_REGISTRATION=true`; subsequent public accounts are read-only viewers.
+
 ### Chat (Public)
 ```
 POST /api/chat              { message, sessionId?, visitorName?, visitorEmail? }
-GET  /api/chat/session/:id  (public)
 GET  /api/chat/sessions     (JWT required, paginated)
+GET  /api/chat/session/:id  (JWT required)
 ```
 
 ### Leads (JWT required except POST)
 ```
-GET    /api/leads           ?page=1&limit=20&status=&source=&search=
-POST   /api/leads           { name, email, phone, source, interest, vehicle }
-PUT    /api/leads/:id       { status, notes, ... }
-DELETE /api/leads/:id
+POST   /api/leads/qualify       { name, email|phone, city, vehicle, budget, purchaseTimeline, consent }
+GET    /api/leads               ?page=1&limit=20&status=&temperature=&search=
+GET    /api/leads/:id
+PUT    /api/leads/:id
+POST   /api/leads/:id/follow-up { channel, scheduledAt?, message? }
+POST   /api/leads/:id/handoff   { reason, assignedTo? }
+DELETE /api/leads/:id           (soft archive)
 ```
 
 ### Bookings
 ```
 GET  /api/bookings          (JWT required)
-POST /api/bookings          { name, email, phone, type, vehicle, date, timeSlot }
-PUT  /api/bookings/:id      (JWT required)
+POST /api/bookings          { name, email, phone, type, vehicle, date, timeSlot } + Idempotency-Key
+PUT  /api/bookings/:id      (JWT required, status lifecycle)
+POST /api/bookings/:id/reschedule (JWT required)
+POST /api/bookings/:id/cancel     (JWT required)
 ```
 
 ### Analytics
 ```
 GET /api/analytics/dashboard  (JWT required)
+GET /api/analytics/owner      (JWT required)
 ```
 
 ---
@@ -220,18 +228,15 @@ curl -X POST http://localhost:5000/api/chat \
 # Create a booking
 curl -X POST http://localhost:5000/api/bookings \
   -H "Content-Type: application/json" \
-  -d '{"name":"Rahul Kumar","email":"rahul@email.com","phone":"+91 9876543210","type":"test-ride","vehicle":"Nexon EV","date":"2025-08-01","timeSlot":"11:00 AM"}'
+  -H "Idempotency-Key: customer-rahul-2026-09-15-1100" \
+  -d '{"name":"Rahul Kumar","email":"rahul@email.com","phone":"+91 9876543210","type":"test-ride","vehicle":"Nexon EV","date":"2026-09-15","timeSlot":"11:00 AM"}'
 ```
 
 ---
 
-## 🧪 Demo Mode
+## 🧪 Offline behavior
 
-The application works **without a MongoDB connection** using built-in demo data:
-- Demo credentials: `admin@tatamotorsev.ai` / `demo1234`
-- All tables show realistic dummy data
-- Chatbot uses intelligent fallback responses
-- Analytics charts use static demo data
+The landing page and grounded local chatbot fallback remain usable when optional AI services are unavailable. Authentication, lead, booking and owner dashboard data require MongoDB; the UI now shows an explicit connection warning instead of presenting fake dealership metrics.
 
 ---
 

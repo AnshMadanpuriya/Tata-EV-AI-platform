@@ -1,5 +1,6 @@
 import React, { useState, useRef, memo } from 'react';
 import { motion, AnimatePresence, useInView } from 'framer-motion';
+import BookingForm from './BookingForm';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
@@ -60,7 +61,7 @@ function SpecRow({ label, val1, val2, icon, highlight = false }) {
 }
 
 // ── EV Card ─────────────────────────────────────────────
-function EVCard({ vehicle }) {
+function EVCard({ vehicle, onBookTestDrive }) {
   return (
     <motion.div
       layout
@@ -103,6 +104,19 @@ function EVCard({ vehicle }) {
           🔋 Battery: {vehicle.battery_capacity} · {vehicle.battery_type || 'Li-ion'}
         </div>
       )}
+      <motion.button
+        type="button"
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        onClick={() => onBookTestDrive?.(`${vehicle.make || ''} ${vehicle.model || ''}`.trim())}
+        style={{
+          width: '100%', marginTop: 14, padding: '11px 14px', border: 0, borderRadius: 9,
+          background: 'linear-gradient(135deg,#0066FF,#00A7E7)', color: 'white',
+          fontSize: 13, fontWeight: 800, cursor: 'pointer',
+        }}
+      >
+        Book Test Drive
+      </motion.button>
     </motion.div>
   );
 }
@@ -172,6 +186,7 @@ function EVExplorer() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [searched, setSearched] = useState(false);
+  const [bookingVehicle, setBookingVehicle] = useState('');
 
   const fetchEVs = async (make, model = '') => {
     if (!make && !model) return;
@@ -344,9 +359,14 @@ function EVExplorer() {
                 Found <span style={{ color: '#00D4FF', fontWeight: 700 }}>{results.length}</span> vehicle{results.length > 1 ? 's' : ''}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
-                {results.map((v, i) => <EVCard key={i} vehicle={v} />)}
+                {results.map((v, i) => <EVCard key={i} vehicle={v} onBookTestDrive={setBookingVehicle} />)}
               </div>
             </motion.div>
+          )}
+        </AnimatePresence>
+        <AnimatePresence>
+          {bookingVehicle && (
+            <BookingForm initialVehicle={bookingVehicle} onClose={() => setBookingVehicle('')} />
           )}
         </AnimatePresence>
       </div>

@@ -16,6 +16,8 @@ This phase turns the existing EV showcase into a measurable dealership sales wor
 - Admin/agent/viewer role checks; only the first account becomes an owner admin by default.
 - Signed n8n event envelopes when `N8N_WEBHOOK_SECRET` is configured.
 - Unit tests for lead scoring and request validation.
+- EV-card test-drive CTA with selected-model prefill, home/showroom preference, address, PIN code and consent.
+- Booking notification workflow that emails the dealership owner and customer, with an optional Slack team alert.
 
 ## Local setup
 
@@ -48,10 +50,26 @@ JWT_EXPIRES_IN=8h
 ALLOW_PUBLIC_REGISTRATION=false
 FRONTEND_URLS=http://localhost:3000
 N8N_AUTOMATION_WEBHOOK_URL=http://localhost:5678/webhook/tataev-automation
+N8N_BOOKING_WEBHOOK_URL=http://localhost:5678/webhook/tataev-booking-notifications
 N8N_WEBHOOK_SECRET=replace_with_a_webhook_signing_secret
+BOOKING_ADMIN_EMAIL=owner@example.com
 ```
 
 Import `n8n-samples/phase1-automation-workflow.json` into n8n and activate it. The starter workflow validates and acknowledges events. Add WATI/Meta WhatsApp, email and CRM nodes after the validator according to the event type.
+
+## Test-drive Gmail and Slack setup
+
+Import `n8n-samples/test-drive-gmail-slack-workflow.json` for booking notifications.
+
+1. Open both Gmail nodes and select a Gmail OAuth2 credential. The sender will be whichever Gmail account is authorized in n8n.
+2. Confirm `BOOKING_ADMIN_EMAIL` in `backend/.env`; this address receives the complete dealership copy.
+3. Activate the workflow and copy its production URL into `N8N_BOOKING_WEBHOOK_URL`.
+4. Submit a test booking with an email address you control. Verify the database record, admin email and customer acknowledgement.
+5. For Slack, connect a Slack OAuth2 credential, select the private team channel, then enable `Slack Team Alert • Enable After Setup`.
+
+The Slack node starts disabled so Gmail notifications can work before Slack authorization is complete. Slack messages intentionally omit the full street address; the owner email and authenticated dashboard retain the complete booking record.
+
+The first customer email says **request received**, not **booking confirmed**. When the team moves a booking from `pending` to `confirmed`, use a separate confirmation workflow after vehicle, staff and slot availability are verified.
 
 ## Lead score
 

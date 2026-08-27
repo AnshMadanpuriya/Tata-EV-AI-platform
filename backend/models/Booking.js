@@ -14,6 +14,10 @@ const bookingSchema = new mongoose.Schema({
   vehicle: { type: String, default: '' },
   date: { type: Date, required: true },
   timeSlot: { type: String, required: true },
+  testDriveMode: { type: String, enum: ['showroom', 'home'], default: 'showroom' },
+  city: { type: String, default: '', trim: true },
+  pincode: { type: String, default: '', trim: true },
+  address: { type: String, default: '', trim: true },
   location: { type: String, default: '' },
   status: { type: String, enum: ['pending', 'confirmed', 'completed', 'cancelled', 'no-show'], default: 'pending' },
   notes: { type: String, default: '' },
@@ -22,6 +26,11 @@ const bookingSchema = new mongoose.Schema({
   idempotencyKey: { type: String, sparse: true, unique: true },
   cancellationReason: { type: String, default: '' },
   reminderSent: { type: Boolean, default: false },
+  consent: {
+    privacyAccepted: { type: Boolean, default: false },
+    emailUpdates: { type: Boolean, default: true },
+    capturedAt: { type: Date, default: Date.now }
+  },
   automation: {
     status: { type: String, enum: ['not-configured', 'queued', 'delivered', 'failed'], default: 'not-configured' },
     lastEvent: { type: String, default: '' },

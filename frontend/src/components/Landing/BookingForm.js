@@ -1,314 +1,245 @@
-import { useState } from 'react';
-import BookingForm from '../components/Landing/BookingForm';
-
-function Hero() {
-  const [showBooking, setShowBooking] = useState(false);
-  return (
-    <>
-      <button onClick={() => setShowBooking(true)}>Book a Demo</button>
-      {showBooking && <BookingForm onClose={() => setShowBooking(false)} />}
-    </>
-  );
-}
-import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import axios from 'axios';
-
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
-
-// ============================================================
-// VALIDATION RULES
-// ============================================================
-function validateForm(form) {
-  const errors = {};
-
-  if (!form.name.trim()) errors.name = 'Full name is required';
-  else if (form.name.trim().length < 3) errors.name = 'Name must be at least 3 characters';
-
-  if (!form.email.trim()) errors.email = 'Email is required';
-  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = 'Enter a valid email address';
-
-  const phoneDigits = form.phone.replace(/\D/g, '').replace(/^91(?=[6-9]\d{9}$)/, '');
-  if (!form.phone.trim()) errors.phone = 'Phone number is required';
-  else if (!/^[6-9]\d{9}$/.test(phoneDigits)) errors.phone = 'Enter a valid Indian phone number';
-
-  if (!form.vehicle) errors.vehicle = 'Please select a vehicle model';
-
-  if (!form.date) errors.date = 'Please select a preferred date';
-  else {
-    const selected = new Date(form.date);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    if (selected < today) errors.date = 'Date cannot be in the past';
-  }
-
-  if (!form.timeSlot) errors.timeSlot = 'Please select a time slot';
-
-  return errors;
-}
+import React, { useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import API from '../../utils/api';
 
 const VEHICLES = ['Nexon EV Max', 'Nexon EV', 'Punch EV', 'Tiago EV', 'Tigor EV', 'Curvv EV'];
 const TIME_SLOTS = ['10:00 AM', '11:00 AM', '12:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM'];
 
-// ============================================================
-// BOOKING FORM COMPONENT
-// ============================================================
-export default function BookingForm({ onClose }) {
-  const [form, setForm] = useState({
-    name: '', email: '', phone: '', vehicle: '', date: '', timeSlot: '',
-    type: 'test-ride', location: '', notes: '',
-  });
+function emptyForm(vehicle = '') {
+  return {
+    name: '', email: '', phone: '', vehicle, date: '', timeSlot: '', type: 'test-ride',
+    testDriveMode: 'showroom', city: '', pincode: '', address: '', location: '', notes: '',
+    privacyAccepted: false,
+  };
+}
+
+function validateForm(form) {
+  const errors = {};
+  const phone = form.phone.replace(/\D/g, '').replace(/^91(?=[6-9]\d{9}$)/, '');
+
+  if (form.name.trim().length < 3) errors.name = 'Enter your full name';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) errors.email = 'Enter a valid email address';
+  if (!/^[6-9]\d{9}$/.test(phone)) errors.phone = 'Enter a valid 10-digit Indian phone number';
+  if (!form.vehicle.trim()) errors.vehicle = 'Select an EV model';
+  if (!form.date) errors.date = 'Select a preferred date';
+  if (!form.timeSlot) errors.timeSlot = 'Select a time slot';
+  if (form.city.trim().length < 2) errors.city = 'Enter your city';
+  if (!/^\d{6}$/.test(form.pincode.trim())) errors.pincode = 'Enter a valid 6-digit PIN code';
+  if (form.testDriveMode === 'home' && form.address.trim().length < 10) errors.address = 'Enter your complete home address';
+  if (!form.privacyAccepted) errors.privacyAccepted = 'Please accept this to submit your request';
+  return errors;
+}
+
+function createIdempotencyKey() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `booking-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+export default function BookingForm({ initialVehicle = '', onClose }) {
+  const [form, setForm] = useState(() => emptyForm(initialVehicle));
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [success, setSuccess] = useState(null);
+  const idempotencyKey = useRef(createIdempotencyKey());
 
-  const set = (key) => (e) => {
-    setForm(p => ({ ...p, [key]: e.target.value }));
-    // Clear that field's error as soon as user starts fixing it
-    if (errors[key]) setErrors(p => ({ ...p, [key]: undefined }));
+  useEffect(() => {
+    setForm((current) => ({ ...current, vehicle: initialVehicle || current.vehicle }));
+  }, [initialVehicle]);
+
+  useEffect(() => {
+    const onKeyDown = (event) => event.key === 'Escape' && onClose?.();
+    document.addEventListener('keydown', onKeyDown);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = '';
+    };
+  }, [onClose]);
+
+  const update = (key) => (event) => {
+    const value = event.target.type === 'checkbox' ? event.target.checked : event.target.value;
+    setForm((current) => ({ ...current, [key]: value }));
+    if (errors[key]) setErrors((current) => ({ ...current, [key]: undefined }));
   };
 
-  // ── STEP 1-2: React validates input, then Axios sends POST ──
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const submit = async (event) => {
+    event.preventDefault();
     setSubmitError('');
-
-    // Client-side validation
     const validationErrors = validateForm(form);
-    if (Object.keys(validationErrors).length > 0) {
+    if (Object.keys(validationErrors).length) {
       setErrors(validationErrors);
-      return; // stop — don't call the API with bad data
+      return;
     }
 
     setLoading(true);
     try {
-      // ── STEP 3: Axios sends POST request to Express backend ──
-      const response = await axios.post(`${API_URL}/bookings`, form, {
-        headers: { 'Content-Type': 'application/json' },
+      const payload = {
+        ...form,
+        consent: { privacyAccepted: form.privacyAccepted, emailUpdates: true, capturedAt: new Date().toISOString() },
+      };
+      delete payload.privacyAccepted;
+      const { data } = await API.post('/bookings', payload, {
+        headers: { 'Idempotency-Key': idempotencyKey.current },
         timeout: 15000,
       });
-
-      if (response.data.success) {
-        setSuccess(response.data);
-        setForm({ name: '', email: '', phone: '', vehicle: '', date: '', timeSlot: '', type: 'test-ride', location: '', notes: '' });
-      } else {
-        setSubmitError(response.data.message || 'Booking failed. Please try again.');
-      }
-    } catch (err) {
-      if (err.response) {
-        // Backend responded with an error (validation failed server-side, etc.)
-        setSubmitError(err.response.data?.message || 'Server rejected the booking. Check your details.');
-      } else if (err.request) {
-        // Request made, no response — backend down
-        setSubmitError('Cannot reach server. Make sure backend is running on port 5000.');
-      } else {
-        setSubmitError('Something went wrong: ' + err.message);
-      }
+      setSuccess(data);
+      setForm(emptyForm(initialVehicle));
+    } catch (error) {
+      setSubmitError(error.response?.data?.message
+        || (error.request ? 'Booking server is unavailable. Please try again shortly.' : 'Could not submit your request.'));
     } finally {
       setLoading(false);
     }
   };
 
-  const inputStyle = (hasError) => ({
-    width: '100%', background: 'rgba(0,0,0,0.4)',
-    border: `1px solid ${hasError ? '#F87171' : 'rgba(255,255,255,0.1)'}`,
-    borderRadius: 9, padding: '11px 14px', color: 'white', fontSize: 13,
-    outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit', transition: 'border-color 0.2s',
+  const fieldStyle = (invalid) => ({
+    width: '100%', background: 'rgba(0,0,0,0.35)',
+    border: `1px solid ${invalid ? '#F87171' : 'rgba(255,255,255,0.11)'}`,
+    borderRadius: 10, padding: '11px 13px', color: 'white', fontSize: 13,
+    outline: 'none', boxSizing: 'border-box',
   });
+  const FieldError = ({ name }) => errors[name]
+    ? <div style={{ color: '#F87171', fontSize: 11, marginTop: 4 }}>{errors[name]}</div>
+    : null;
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 9999,
-      background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
-    }} onClick={(e) => e.target === e.currentTarget && onClose?.()}>
-
-      <motion.div
-        initial={{ opacity: 0, scale: 0.9, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.9 }}
-        transition={{ duration: 0.3 }}
-        style={{
-          background: '#0D1422', border: '1px solid #1A2540', borderRadius: 20,
-          width: '100%', maxWidth: 520, maxHeight: '90vh', overflowY: 'auto',
-        }}
-      >
-        {/* Header */}
-        <div style={{
-          padding: '20px 24px', borderBottom: '1px solid #1A2540',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          position: 'sticky', top: 0, background: '#0D1422', zIndex: 1,
+    <div role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose?.()} style={{
+      position: 'fixed', inset: 0, zIndex: 9999, padding: 18, display: 'flex', alignItems: 'center',
+      justifyContent: 'center', background: 'rgba(2,6,14,0.82)', backdropFilter: 'blur(10px)',
+    }}>
+      <motion.div role="dialog" aria-modal="true" aria-labelledby="test-drive-title"
+        initial={{ opacity: 0, scale: 0.96, y: 22 }} animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.97, y: 16 }} transition={{ duration: 0.24 }} style={{
+          width: '100%', maxWidth: 650, maxHeight: '92vh', overflowY: 'auto',
+          background: 'linear-gradient(160deg,#10192A,#0A101C)', border: '1px solid rgba(55,199,255,0.22)',
+          borderRadius: 22, boxShadow: '0 28px 90px rgba(0,0,0,0.55)',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 20 }}>📅</span>
-            <div>
-              <div style={{ fontSize: 16, fontWeight: 800, color: 'white' }}>Book a Test Ride</div>
-              <div style={{ fontSize: 11, color: '#6B7280' }}>Confirmed within 2 hours</div>
-            </div>
+        <div style={{
+          position: 'sticky', top: 0, zIndex: 2, padding: '18px 22px', display: 'flex',
+          justifyContent: 'space-between', alignItems: 'center', gap: 12,
+          background: 'rgba(13,20,34,0.97)', borderBottom: '1px solid rgba(255,255,255,0.07)',
+        }}>
+          <div>
+            <div id="test-drive-title" style={{ color: 'white', fontWeight: 800, fontSize: 18 }}>🚗 Book your EV test drive</div>
+            <div style={{ color: '#8090A8', fontSize: 11, marginTop: 3 }}>Submit a request now. The dealership confirms the final slot.</div>
           </div>
-          <button onClick={onClose} style={{
-            background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: 8, width: 32, height: 32, color: '#9CA3AF', cursor: 'pointer', fontSize: 18,
+          <button type="button" aria-label="Close booking form" onClick={onClose} style={{
+            width: 34, height: 34, borderRadius: 9, border: '1px solid rgba(255,255,255,0.1)',
+            background: 'rgba(255,255,255,0.04)', color: '#B7C0CE', cursor: 'pointer', fontSize: 20,
           }}>×</button>
         </div>
 
         <AnimatePresence mode="wait">
           {success ? (
-            // ── SUCCESS STATE ──
-            <motion.div
-              key="success"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              style={{ padding: '40px 24px', textAlign: 'center' }}
-            >
-              <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 200 }} style={{ fontSize: 56, marginBottom: 16 }}>✅</motion.div>
-              <div style={{ fontSize: 20, fontWeight: 800, color: 'white', marginBottom: 8 }}>Test-drive request received</div>
-              <div style={{ fontSize: 13, color: '#9CA3AF', marginBottom: 20, lineHeight: 1.6 }}>
-                Your request is saved. The dealership will confirm the exact slot shortly.
+            <motion.div key="success" initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ padding: '42px 24px', textAlign: 'center' }}>
+              <div style={{ fontSize: 58, marginBottom: 14 }}>✅</div>
+              <h3 style={{ color: 'white', fontSize: 22, marginBottom: 8 }}>Test-drive request received</h3>
+              <p style={{ color: '#9CA3AF', fontSize: 13, lineHeight: 1.65, maxWidth: 460, margin: '0 auto 20px' }}>
+                We saved your request and sent it to the dealership workflow. You will receive an acknowledgement email, followed by a separate confirmation after the team verifies the slot.
+              </p>
+              <div style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 14px', marginBottom: 22,
+                borderRadius: 10, background: 'rgba(0,212,255,0.08)', border: '1px solid rgba(0,212,255,0.18)',
+                color: '#8FEAFF', fontSize: 12,
+              }}>
+                Booking code <strong style={{ fontFamily: 'monospace', color: 'white' }}>{success.booking?.bookingCode}</strong>
               </div>
-
-              {/* Automation status */}
-              <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: 12, padding: 16, marginBottom: 20, textAlign: 'left' }}>
-                {[
-                  { icon: '💾', label: 'Saved to database', done: true },
-                  { icon: '🗓️', label: 'Awaiting dealership slot confirmation', done: true },
-                  {
-                    icon: '⚙️',
-                    label: success.automation?.status === 'delivered'
-                      ? 'n8n automation accepted the request'
-                      : success.automation?.status === 'failed'
-                        ? 'Automation needs staff attention'
-                        : 'Automation webhook is not configured yet',
-                    done: success.automation?.status === 'delivered',
-                  },
-                ].map(({ icon, label, done }) => (
-                  <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
-                    <span>{icon}</span>
-                    <span style={{ flex: 1, fontSize: 12, color: '#D1D5DB' }}>{label}</span>
-                    <span style={{ color: done ? '#00FF88' : '#FBBF24', fontSize: 13 }}>{done ? '✓' : '!'}</span>
-                  </div>
-                ))}
+              <div style={{ color: success.automation?.status === 'failed' ? '#FBBF24' : '#7DD3FC', fontSize: 11, marginBottom: 24 }}>
+                {success.automation?.status === 'delivered'
+                  ? 'Notification workflow accepted the request.'
+                  : success.automation?.status === 'failed'
+                    ? 'Booking is safe, but the notification workflow needs staff attention.'
+                    : 'Booking is safe. Notifications will work after n8n is connected.'}
               </div>
-
-              <div style={{ background: 'rgba(0,102,255,0.06)', border: '1px solid rgba(0,102,255,0.15)', borderRadius: 10, padding: 12, fontSize: 12, color: '#9CA3AF', marginBottom: 20 }}>
-                Booking code: <span style={{ color: '#00D4FF', fontFamily: 'monospace' }}>{success.booking?.bookingCode || success.booking?._id?.slice(-8) || 'N/A'}</span>
-              </div>
-
-              <button onClick={onClose} style={{
-                background: '#0066FF', color: 'white', border: 'none', borderRadius: 10,
-                padding: '12px 32px', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+              <button type="button" onClick={onClose} style={{
+                border: 0, borderRadius: 10, padding: '12px 34px', background: '#0066FF',
+                color: 'white', fontWeight: 700, cursor: 'pointer',
               }}>Done</button>
             </motion.div>
           ) : (
-            // ── FORM STATE ──
-            <motion.form
-              key="form"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              onSubmit={handleSubmit}
-              style={{ padding: 24 }}
-            >
-              {/* Name + Phone */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, color: '#9CA3AF', marginBottom: 6 }}>Full Name *</label>
-                  <input value={form.name} onChange={set('name')} placeholder="Arjun Rathi" style={inputStyle(errors.name)} />
-                  {errors.name && <div style={{ fontSize: 11, color: '#F87171', marginTop: 4 }}>{errors.name}</div>}
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, color: '#9CA3AF', marginBottom: 6 }}>Phone Number *</label>
-                  <input value={form.phone} onChange={set('phone')} placeholder="9876543210" style={inputStyle(errors.phone)} />
-                  {errors.phone && <div style={{ fontSize: 11, color: '#F87171', marginTop: 4 }}>{errors.phone}</div>}
-                </div>
-              </div>
-
-              {/* Email */}
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: 12, color: '#9CA3AF', marginBottom: 6 }}>Email Address *</label>
-                <input type="email" value={form.email} onChange={set('email')} placeholder="arjun@gmail.com" style={inputStyle(errors.email)} />
-                {errors.email && <div style={{ fontSize: 11, color: '#F87171', marginTop: 4 }}>{errors.email}</div>}
-              </div>
-
-              {/* Vehicle + Type */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, color: '#9CA3AF', marginBottom: 6 }}>Vehicle Model *</label>
-                  <select value={form.vehicle} onChange={set('vehicle')} style={inputStyle(errors.vehicle)}>
-                    <option value="">Select model</option>
-                    {VEHICLES.map(v => <option key={v} value={v}>{v}</option>)}
+            <motion.form key="form" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onSubmit={submit} style={{ padding: 22 }}>
+              <div className="booking-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <label style={{ color: '#9CA3AF', fontSize: 12 }}>Full name *
+                  <input value={form.name} onChange={update('name')} autoComplete="name" placeholder="Your full name" style={{ ...fieldStyle(errors.name), marginTop: 6 }} />
+                  <FieldError name="name" />
+                </label>
+                <label style={{ color: '#9CA3AF', fontSize: 12 }}>Phone number *
+                  <input value={form.phone} onChange={update('phone')} inputMode="tel" autoComplete="tel" placeholder="9876543210" style={{ ...fieldStyle(errors.phone), marginTop: 6 }} />
+                  <FieldError name="phone" />
+                </label>
+                <label style={{ color: '#9CA3AF', fontSize: 12, gridColumn: '1 / -1' }}>Email address *
+                  <input type="email" value={form.email} onChange={update('email')} autoComplete="email" placeholder="you@gmail.com" style={{ ...fieldStyle(errors.email), marginTop: 6 }} />
+                  <FieldError name="email" />
+                </label>
+                <label style={{ color: '#9CA3AF', fontSize: 12 }}>Selected EV *
+                  <input list="booking-vehicles" value={form.vehicle} onChange={update('vehicle')} placeholder="Select or enter EV model" style={{ ...fieldStyle(errors.vehicle), marginTop: 6 }} />
+                  <datalist id="booking-vehicles">{VEHICLES.map((vehicle) => <option key={vehicle} value={vehicle} />)}</datalist>
+                  <FieldError name="vehicle" />
+                </label>
+                <label style={{ color: '#9CA3AF', fontSize: 12 }}>Test-drive preference *
+                  <select value={form.testDriveMode} onChange={update('testDriveMode')} style={{ ...fieldStyle(false), marginTop: 6 }}>
+                    <option value="showroom">Visit showroom</option>
+                    <option value="home">Home test drive</option>
                   </select>
-                  {errors.vehicle && <div style={{ fontSize: 11, color: '#F87171', marginTop: 4 }}>{errors.vehicle}</div>}
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, color: '#9CA3AF', marginBottom: 6 }}>Booking Type</label>
-                  <select value={form.type} onChange={set('type')} style={inputStyle(false)}>
-                    <option value="test-ride">Test Ride</option>
-                    <option value="demo">Product Demo</option>
-                    <option value="service">Service</option>
-                    <option value="consultation">Consultation</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Date + Time */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, color: '#9CA3AF', marginBottom: 6 }}>Preferred Date *</label>
-                  <input type="date" min={new Date().toISOString().split('T')[0]} value={form.date} onChange={set('date')} style={inputStyle(errors.date)} />
-                  {errors.date && <div style={{ fontSize: 11, color: '#F87171', marginTop: 4 }}>{errors.date}</div>}
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, color: '#9CA3AF', marginBottom: 6 }}>Time Slot *</label>
-                  <select value={form.timeSlot} onChange={set('timeSlot')} style={inputStyle(errors.timeSlot)}>
+                </label>
+                <label style={{ color: '#9CA3AF', fontSize: 12 }}>Preferred date *
+                  <input type="date" min={new Date().toISOString().slice(0, 10)} value={form.date} onChange={update('date')} style={{ ...fieldStyle(errors.date), marginTop: 6 }} />
+                  <FieldError name="date" />
+                </label>
+                <label style={{ color: '#9CA3AF', fontSize: 12 }}>Preferred time *
+                  <select value={form.timeSlot} onChange={update('timeSlot')} style={{ ...fieldStyle(errors.timeSlot), marginTop: 6 }}>
                     <option value="">Select time</option>
-                    {TIME_SLOTS.map(t => <option key={t} value={t}>{t}</option>)}
+                    {TIME_SLOTS.map((slot) => <option key={slot} value={slot}>{slot}</option>)}
                   </select>
-                  {errors.timeSlot && <div style={{ fontSize: 11, color: '#F87171', marginTop: 4 }}>{errors.timeSlot}</div>}
-                </div>
+                  <FieldError name="timeSlot" />
+                </label>
+                <label style={{ color: '#9CA3AF', fontSize: 12 }}>City *
+                  <input value={form.city} onChange={update('city')} autoComplete="address-level2" placeholder="Indore" style={{ ...fieldStyle(errors.city), marginTop: 6 }} />
+                  <FieldError name="city" />
+                </label>
+                <label style={{ color: '#9CA3AF', fontSize: 12 }}>PIN code *
+                  <input value={form.pincode} onChange={update('pincode')} inputMode="numeric" autoComplete="postal-code" maxLength={6} placeholder="452001" style={{ ...fieldStyle(errors.pincode), marginTop: 6 }} />
+                  <FieldError name="pincode" />
+                </label>
+                {form.testDriveMode === 'home' ? (
+                  <label style={{ color: '#9CA3AF', fontSize: 12, gridColumn: '1 / -1' }}>Complete home address *
+                    <textarea rows={3} value={form.address} onChange={update('address')} autoComplete="street-address" placeholder="House/flat, street, landmark and locality" style={{ ...fieldStyle(errors.address), marginTop: 6, resize: 'vertical' }} />
+                    <FieldError name="address" />
+                  </label>
+                ) : (
+                  <label style={{ color: '#9CA3AF', fontSize: 12, gridColumn: '1 / -1' }}>Preferred showroom/location
+                    <input value={form.location} onChange={update('location')} placeholder="Nearest Tata EV showroom or area" style={{ ...fieldStyle(false), marginTop: 6 }} />
+                  </label>
+                )}
+                <label style={{ color: '#9CA3AF', fontSize: 12, gridColumn: '1 / -1' }}>Additional notes
+                  <textarea rows={2} value={form.notes} onChange={update('notes')} placeholder="Accessibility, preferred contact time, or other request" style={{ ...fieldStyle(false), marginTop: 6, resize: 'vertical' }} />
+                </label>
               </div>
 
-              {/* Location */}
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: 12, color: '#9CA3AF', marginBottom: 6 }}>Preferred Location</label>
-                <input value={form.location} onChange={set('location')} placeholder="e.g. Mumbai Showroom" style={inputStyle(false)} />
-              </div>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, color: '#9CA3AF', fontSize: 11, lineHeight: 1.5, marginTop: 16 }}>
+                <input type="checkbox" checked={form.privacyAccepted} onChange={update('privacyAccepted')} style={{ marginTop: 2 }} />
+                <span>I agree that my details may be stored and used by the dealership to process this test-drive request and send transactional updates.</span>
+              </label>
+              <FieldError name="privacyAccepted" />
 
-              {/* Notes */}
-              <div style={{ marginBottom: 18 }}>
-                <label style={{ display: 'block', fontSize: 12, color: '#9CA3AF', marginBottom: 6 }}>Additional Notes</label>
-                <textarea rows={3} value={form.notes} onChange={set('notes')} placeholder="Any special requirements..." style={{ ...inputStyle(false), resize: 'none' }} />
-              </div>
+              {submitError && <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 9, color: '#FCA5A5', background: 'rgba(239,68,68,0.1)', fontSize: 12 }}>⚠️ {submitError}</div>}
 
-              {/* Submit error */}
-              {submitError && (
-                <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: '#F87171' }}>
-                  ⚠️ {submitError}
-                </div>
-              )}
-
-              {/* Submit button */}
               <button type="submit" disabled={loading} style={{
-                width: '100%', background: loading ? '#1A2540' : 'linear-gradient(135deg,#0066FF,#0044CC)',
-                color: 'white', border: 'none', borderRadius: 10, padding: '14px',
-                fontSize: 15, fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                boxShadow: loading ? 'none' : '0 0 24px rgba(0,102,255,0.3)',
+                width: '100%', marginTop: 18, padding: 14, border: 0, borderRadius: 11,
+                background: loading ? '#1A2540' : 'linear-gradient(135deg,#0066FF,#00A7E7)',
+                color: 'white', fontWeight: 800, cursor: loading ? 'not-allowed' : 'pointer',
               }}>
-                {loading ? (
-                  <><div style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: 'white', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} /> Booking...</>
-                ) : '📅 Confirm Booking'}
+                {loading ? 'Submitting request…' : 'Submit test-drive request'}
               </button>
-
-              <p style={{ textAlign: 'center', fontSize: 11, color: '#374151', marginTop: 12 }}>
-                🔒 You'll receive Email + WhatsApp confirmation instantly
+              <p style={{ color: '#637086', fontSize: 10, textAlign: 'center', marginTop: 10 }}>
+                A request acknowledgement is not the final slot confirmation.
               </p>
             </motion.form>
           )}
         </AnimatePresence>
+        <style>{`@media(max-width:640px){.booking-form-grid{grid-template-columns:1fr!important}}`}</style>
       </motion.div>
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

@@ -5,6 +5,8 @@ const LEAD_INTERESTS = ['test-ride', 'purchase', 'service', 'charging', 'general
 const LEAD_BUDGETS = ['', 'under-10', '10-15', '15-20', '20-plus'];
 const PURCHASE_TIMELINES = ['', '0-30-days', '31-90-days', '3-6-months', 'researching'];
 const BOOKING_TYPES = ['test-ride', 'demo', 'service', 'consultation'];
+const TEST_DRIVE_MODES = ['showroom', 'home'];
+const VALID_PINCODE = /^\d{6}$/;
 
 function cleanText(value, maxLength = 300) {
   return String(value || '').replace(/[<>]/g, '').trim().slice(0, maxLength);
@@ -58,8 +60,19 @@ function validateBooking(body = {}, { partial = false } = {}) {
     date: body.date,
     timeSlot: cleanText(body.timeSlot, 30),
     type: body.type || 'test-ride',
+    testDriveMode: TEST_DRIVE_MODES.includes(body.testDriveMode) ? body.testDriveMode : 'showroom',
+    city: cleanText(body.city, 80),
+    pincode: cleanText(body.pincode, 6),
+    address: cleanText(body.address, 500),
     location: cleanText(body.location, 120),
-    notes: cleanText(body.notes, 1000)
+    notes: cleanText(body.notes, 1000),
+    consent: {
+      privacyAccepted: body.consent?.privacyAccepted === true,
+      emailUpdates: body.consent?.emailUpdates !== false,
+      capturedAt: body.consent?.capturedAt && !Number.isNaN(new Date(body.consent.capturedAt).getTime())
+        ? new Date(body.consent.capturedAt)
+        : new Date()
+    }
   };
 
   if (!partial || body.name !== undefined) {
@@ -82,6 +95,11 @@ function validateBooking(body = {}, { partial = false } = {}) {
   }
   if ((!partial || body.timeSlot !== undefined) && !value.timeSlot) errors.push('Time slot is required');
   if (value.type && !BOOKING_TYPES.includes(value.type)) errors.push('Invalid booking type');
+  if ((!partial || body.city !== undefined) && value.city.length < 2) errors.push('City is required');
+  if ((!partial || body.pincode !== undefined) && !VALID_PINCODE.test(value.pincode)) errors.push('Valid 6-digit PIN code is required');
+  if (body.testDriveMode && !TEST_DRIVE_MODES.includes(body.testDriveMode)) errors.push('Invalid test-drive preference');
+  if (value.testDriveMode === 'home' && value.address.length < 10) errors.push('Complete home address is required for a home test drive');
+  if ((!partial || body.consent !== undefined) && !value.consent.privacyAccepted) errors.push('Privacy consent is required');
 
   return { errors, value };
 }

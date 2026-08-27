@@ -560,9 +560,16 @@ async function recordBookingAutomation(booking, event) {
     date: booking.date,
     timeSlot: booking.timeSlot,
     type: booking.type,
+    testDriveMode: booking.testDriveMode,
+    city: booking.city,
+    pincode: booking.pincode,
+    address: booking.address,
     location: booking.location,
+    notes: booking.notes,
     status: booking.status,
-    leadId: booking.leadId
+    leadId: booking.leadId,
+    adminEmail: process.env.BOOKING_ADMIN_EMAIL || '',
+    customerEmailEnabled: booking.consent?.emailUpdates !== false
   });
   booking.automation = {
     status: result.status,
@@ -599,7 +606,7 @@ app.post('/api/bookings', async (req, res) => {
       name: value.name,
       email: value.email,
       phone: value.phone,
-      city: cleanText(req.body.city, 80),
+      city: value.city,
       source: 'booking',
       interest: value.type === 'test-ride' ? 'test-ride' : 'general',
       vehicle: value.vehicle,

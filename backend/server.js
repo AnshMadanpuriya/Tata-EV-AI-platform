@@ -28,12 +28,33 @@ app.use(express.json());
 // ─── Config ───────────────────────────────────────────────
 const MONGO_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/tatamotors-ev';
 const JWT_SECRET = process.env.JWT_SECRET || 'tatamotors_ev_secret_2025';
-const N8N_BOOKING_WEBHOOK = process.env.N8N_BOOKING_WEBHOOK_URL || '';
+const MAKE_WEBHOOK_URL = process.env.MAKE_WEBHOOK_URL || process.env.N8N_BOOKING_WEBHOOK_URL || '';
 const EV_API_KEY = process.env.EV_API_KEY || '';
 const EV_API_BASE = 'https://api.api-ninjas.com/v1';
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY || '';
 const MISTRAL_CHAT_MODEL = process.env.MISTRAL_CHAT_MODEL || 'mistral-small-latest';
 const MISTRAL_CHAT_URL = 'https://api.mistral.ai/v1/chat/completions';
+
+async function triggerMakeWebhook(event, payload) {
+  if (!MAKE_WEBHOOK_URL) {
+    console.log(`ℹ️ MAKE_WEBHOOK_URL not set — skipping ${event} automation`);
+    return;
+  }
+
+  try {
+    await axios.post(
+      MAKE_WEBHOOK_URL,
+      { event, ...payload },
+      {
+        timeout: 10000,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+    console.log(`✅ Make automation triggered: ${event}`);
+  } catch (err) {
+    console.error(`⚠️ Make webhook failed for ${event}:`, err.message);
+  }
+}
 
 mongoose.connect(MONGO_URI)
   .then(() => console.log('✅ MongoDB Connected:', MONGO_URI))
@@ -438,6 +459,17 @@ app.post('/api/enquiry', async (req, res) => {
       message: 'Enquiry submitted! We will contact you within 24 hours.',
       enquiry,
     });
+
+    void triggerMakeWebhook('new_enquiry', {
+      enquiryId: enquiry._id,
+      name: enquiry.name,
+      email: enquiry.email,
+      phone: enquiry.phone,
+      company: enquiry.company,
+      message: enquiry.message,
+      source: enquiry.source,
+      createdAt: enquiry.createdAt,
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -469,7 +501,7 @@ app.put('/api/enquiry/:id', authMiddleware, async (req, res) => {
 });
 
 // ============================================================
-// BOOKING ROUTES — with n8n automation
+// BOOKING ROUTES — with Make automation
 // ============================================================
 function validateBookingData(body) {
   const errors = [];
@@ -523,17 +555,19 @@ app.post('/api/bookings', async (req, res) => {
       booking,
     });
 
-    if (N8N_BOOKING_WEBHOOK) {
-      axios.post(N8N_BOOKING_WEBHOOK, {
-        bookingId: booking._id, name: booking.name, email: booking.email, phone: booking.phone,
-        vehicle: booking.vehicle, date: booking.date, timeSlot: booking.timeSlot,
-        type: booking.type, location: booking.location, notes: booking.notes, createdAt: booking.createdAt,
-      }, { timeout: 10000 })
-        .then(() => console.log(`✅ n8n automation triggered for booking ${booking._id}`))
-        .catch(err => console.error(`⚠️ n8n webhook failed (booking still saved OK):`, err.message));
-    } else {
-      console.log('ℹ️ N8N_BOOKING_WEBHOOK_URL not set — skipping automation trigger');
-    }
+    void triggerMakeWebhook('new_booking', {
+      bookingId: booking._id,
+      name: booking.name,
+      email: booking.email,
+      phone: booking.phone,
+      vehicle: booking.vehicle,
+      date: booking.date,
+      timeSlot: booking.timeSlot,
+      type: booking.type,
+      location: booking.location,
+      notes: booking.notes,
+      createdAt: booking.createdAt,
+    });
   } catch (err) {
     console.error('Booking creation error:', err.message);
     res.status(500).json({ success: false, message: 'Server error while saving booking. Please try again.' });
